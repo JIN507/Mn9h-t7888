@@ -1,0 +1,16 @@
+Flask==2.0.1
+Flask-Cors==3.0.10
+requests==2.26.0
+Pillow==8.3.2
+opencv-python-headless==4.5.3.56
+python-dotenv==0.19.1
+Werkzeug==2.0.1
+flask-babel==2.0.0
+python-magic==0.4.24
+numpy==1.21.2
+playwright==1.35.0
+# Captcha handling dependencies
+pydub==0.25.1
+SpeechRecognition==3.10.0
+# Production server
+gunicorn==20.1.0

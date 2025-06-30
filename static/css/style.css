@@ -1,0 +1,197 @@
+/* Bahith Al-Suwar - Arabic Reverse Image Search App */
+
+/* RTL Support */
+[dir="rtl"] {
+    text-align: right;
+}
+
+/* Custom Colors */
+:root {
+    --primary-color: #2563eb;
+    --secondary-color: #26a69a;
+    --accent-color: #ff5722;
+    --background-color: #f5f5f5;
+    --text-color: #333333;
+}
+
+/* Override Bootstrap's primary color */
+.bg-primary {
+    background-color: #2563eb !important;
+}
+
+.btn-primary {
+    background-color: #2563eb !important;
+    border-color: #2563eb !important;
+}
+
+.progress-bar {
+    background-color: #2563eb !important;
+}
+
+.text-primary {
+    color: #2563eb !important;
+}
+
+body {
+    background-color: var(--background-color);
+    color: var(--text-color);
+    font-family: 'Tajawal', 'Arial', sans-serif;
+}
+
+/* Header */
+header {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Upload Area */
+.upload-area {
+    transition: all 0.3s ease;
+    cursor: pointer;
+    min-height: 200px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.upload-area:hover {
+    border-color: #2563eb !important;
+    background-color: rgba(37, 99, 235, 0.1);
+}
+
+/* Preview */
+#image-preview, #video-preview {
+    max-height: 300px;
+    object-fit: contain;
+}
+
+/* Cards and UI Elements */
+.card-header {
+    background-color: rgba(37, 99, 235, 0.2) !important;
+    border-bottom: 1px solid rgba(37, 99, 235, 0.3);
+}
+
+/* Nav links and tabs styling */
+.nav-link:hover, .nav-link:focus {
+    color: #2563eb !important;
+}
+
+/* Custom nav-tabs styling */
+.nav-tabs .nav-link {
+    color: #6c757d;
+    border-bottom: 2px solid transparent;
+}
+
+.nav-tabs .nav-link:hover,
+.nav-tabs .nav-link:focus {
+    color: #2563eb !important;
+    border-bottom-color: rgba(37, 99, 235, 0.3);
+}
+
+.nav-tabs .nav-link.active {
+    color: #2563eb !important;
+    background-color: transparent;
+    border-color: rgba(37, 99, 235, 0.2);
+    border-bottom-color: #2563eb;
+    font-weight: 500;
+}
+
+/* Ensure the dropdown items use the correct color */
+.dropdown-item {
+    color: #555;
+}
+
+/* Header nav links - ensure they're white when in header */
+header .nav-link {
+    color: #fff !important;
+}
+
+header .nav-link:hover,
+header .nav-link:focus {
+    color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.dropdown-item:active, .dropdown-item:focus {
+    background-color: #2563eb !important;
+}
+
+a {
+    color: #2563eb;
+}
+
+a:hover {
+    color: rgba(37, 99, 235, 0.8);
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 0.25rem rgba(37, 99, 235, 0.25);
+}
+
+/* Results */
+.tab-content {
+    min-height: 150px;
+}
+
+/* Loading Animation */
+.spinner-border {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* Frames Grid */
+.card img {
+    height: 180px;
+    object-fit: cover;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    .card img {
+        height: 140px;
+    }
+}
+
+/* Add a font for Arabic text */
+@font-face {
+    font-family: 'Tajawal';
+    font-style: normal;
+    font-weight: 400;
+    src: url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
+}
+
+/* Footer */
+footer {
+    margin-top: auto;
+}
+
+/* Button Styling */
+.btn-primary {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.btn-primary:hover {
+    background-color: #1d4ed8;
+    border-color: #1d4ed8;
+}
+
+.btn-success {
+    background-color: var(--secondary-color);
+    border-color: var(--secondary-color);
+}
+
+.btn-success:hover {
+    background-color: #00897b;
+    border-color: #00897b;
+}
+
+/* Card Styling */
+.card {
+    transition: transform 0.3s ease;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+}

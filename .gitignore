@@ -1,0 +1,42 @@
+# Virtual environment
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Chromium browser - this is installed by Playwright
+chromium/
+
+# User data directories - these are generated at runtime
+user-data/
+user_data/
+user-profile/
+
+# FFmpeg - can be installed separately on the server
+ffmpeg-2025-05-05-git-f4e72eb5a3-essentials_build/
+
+# Default directory (browser cache and other files)
+Default/
+
+# Cache directories
+.cache/
+__pycache__/
+
+# Upload folders - only keep the directory structure
+uploads/*
+!uploads/.gitkeep
+static/uploads/audio/*
+!static/uploads/audio/.gitkeep
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Editor directories and files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment files
+.env

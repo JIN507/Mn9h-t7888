@@ -1,0 +1,711 @@
+{% extends 'base.html' %}
+
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+<style>
+    /* CSS styles for the AI detection page */
+    .file-drop-area {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        padding: 2rem 1.5rem;
+        border: 2px dashed #2563eb;
+        border-radius: 0.5rem;
+        transition: 0.2s;
+        background-color: #f8f9fa;
+        flex-direction: column;
+        cursor: pointer;
+    }
+    
+    .file-drop-area.is-active {
+        background-color: rgba(37, 99, 235, 0.05);
+    }
+    
+    .file-msg {
+        font-size: 1.1rem;
+        font-weight: 500;
+        color: #2563eb;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .file-msg i {
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+        color: #2563eb;
+    }
+    
+    .file-input {
+        position: absolute;
+        left: 0;
+        top: 0;
+        height: 100%;
+        width: 100%;
+        cursor: pointer;
+        opacity: 0;
+    }
+    
+    .image-preview-container {
+        position: relative;
+    }
+    
+    .remove-file-btn {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.875rem;
+        z-index: 2;
+    }
+    
+    .image-preview-container img {
+        max-height: 300px;
+        width: auto;
+        border-radius: 0.5rem;
+        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    }
+    
+    .file-details {
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+    }
+    
+    /* Progress bar styles */
+    .progress-container {
+        margin: 1.5rem 0;
+    }
+    
+    /* Results display styles */
+    .result-image {
+        max-width: 100%;
+        max-height: 300px;
+        border-radius: 0.5rem;
+    }
+    
+    .confidence-bar {
+        height: 1.5rem;
+    }
+</style>
+{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header text-center bg-primary text-white">
+                <h2 class="mb-0">التحقق من الصور باستخدام الذكاء الاصطناعي</h2>
+            </div>
+            <div class="card-body">
+                <p class="lead text-center">قم برفع صورة ليتم التحقق منها بواسطة الذكاء الاصطناعي</p>
+                
+                <!-- Detection Service Selection Tabs -->
+                <ul class="nav nav-tabs mb-4" id="detectionServiceTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="thehive-tab" data-bs-toggle="tab" 
+                                data-bs-target="#thehive" type="button" role="tab" 
+                                aria-controls="thehive" aria-selected="true"
+                                style="color: #2563eb; border-bottom-color: #2563eb;">
+                            TheHive.ai
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="faceonlive-tab" data-bs-toggle="tab" 
+                                data-bs-target="#faceonlive" type="button" role="tab" 
+                                aria-controls="faceonlive" aria-selected="false"
+                                style="color: #6c757d; transition: color 0.3s ease;">
+                            FaceOnLive
+                        </button>
+                    </li>
+                </ul>
+
+                <!-- Form for image upload -->
+                <form id="ai-detection-form" class="mb-4" enctype="multipart/form-data">
+                    <div class="card mb-4 border-primary">
+                        <div class="card-header bg-primary bg-opacity-10 text-primary fw-bold">
+                            <i class="bi bi-image me-2"></i>اختيار الصورة
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <div class="file-drop-area" id="ai-image-drop-area">
+                                    <span class="file-msg">
+                                        <i class="bi bi-cloud-arrow-up"></i>
+                                        اسحب وأفلت صورة هنا أو انقر للاختيار
+                                    </span>
+                                    <input type="file" class="file-input" id="ai-image-file-input" accept="image/*">
+                                </div>
+                            </div>
+                            
+                            <!-- Image preview container -->
+                            <div id="ai-image-preview-container" class="image-preview-container text-center mb-3 d-none">
+                                <button type="button" id="remove-ai-image-btn" class="btn btn-danger btn-sm remove-file-btn">
+                                    <i class="bi bi-x"></i>
+                                </button>
+                                <img src="" id="ai-image-preview" class="img-fluid" alt="معاينة الصورة">
+                                <div class="file-details bg-light mt-2 rounded">
+                                    <div class="d-flex justify-content-between">
+                                        <span class="fw-bold">الملف:</span>
+                                        <span id="selectedImageName">-</span>
+                                    </div>
+                                    <div class="d-flex justify-content-between">
+                                        <span class="fw-bold">الحجم:</span>
+                                        <span id="selectedImageSize">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Image preview box (alternative display for mobile) -->
+                            <div id="image-preview-box" class="d-none">
+                                <div class="alert alert-info">
+                                    <div class="d-flex align-items-center">
+                                        <i class="bi bi-check-circle me-2"></i>
+                                        <div>تم اختيار الصورة بنجاح</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-footer d-flex justify-content-center">
+                            <button type="submit" id="detect-ai-btn" class="btn btn-primary px-4">
+                                <span id="aiDetectionSpinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
+                                التحقق من الصورة
+                            </button>
+                        </div>
+                    </div>
+                </form>
+
+                <!-- AI loading indicator -->
+                <div id="ai-loading-indicator" class="d-none text-center mb-4">
+                    <div class="progress progress-container">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" id="ai-progress-bar"
+                             style="width: 0%"></div>
+                    </div>
+                    <p class="mb-0 text-muted">
+                        <small>يتم تحميل وتحليل الصورة، يرجى الانتظار...</small>
+                    </p>
+                </div>
+
+                <!-- Results container -->
+                <div id="ai-results-container" class="d-none">
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-header bg-primary text-white d-flex align-items-center justify-content-between">
+                            <h3 class="h5 mb-0">نتائج التحليل</h3>
+                            <button type="button" class="btn btn-sm btn-outline-light" id="resetAiDetection">فحص صورة أخرى</button>
+                        </div>
+                        <div class="card-body">
+                            <div class="row mb-4">
+                                <div class="col-md-4 mb-3">
+                                    <img id="result-image" class="result-image img-fluid" alt="الصورة المحللة">
+                                </div>
+                                <div class="col-md-8">
+                                    <div id="resultAlert" class="alert alert-primary mb-3">
+                                        <h4 id="resultVerdict" class="mb-0">جاري التحليل...</h4>
+                                    </div>
+                                    <div id="resultDetails"></div>
+                                    <div class="mt-3 d-flex align-items-center justify-content-between">
+                                        <span class="text-muted small">وقت التحليل: <span id="analysis-time"></span></span>
+                                        <span class="badge bg-info">النتائج الخام</span>
+                                    </div>
+                                    <div class="mt-3" id="rawResultsSection">
+                                        <div class="card card-body bg-light">
+                                            <pre id="result-raw" class="mb-0" style="white-space: pre-wrap;">لا توجد نتائج بعد</pre>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // File upload and preview functionality
+    document.addEventListener('DOMContentLoaded', function() {
+        // Elements
+        const fileDropArea = document.getElementById('ai-image-drop-area');
+        const fileInput = document.getElementById('ai-image-file-input');
+        const imagePreview = document.getElementById('ai-image-preview');
+        const imagePreviewContainer = document.getElementById('ai-image-preview-container');
+        const imagePreviewBox = document.getElementById('image-preview-box');
+        const removeFileBtn = document.getElementById('remove-ai-image-btn');
+        const fileNameDisplay = document.getElementById('selectedImageName');
+        const fileSizeDisplay = document.getElementById('selectedImageSize');
+        const aiDetectionForm = document.getElementById('ai-detection-form');
+        const detectAiBtn = document.getElementById('detect-ai-btn');
+        const aiDetectionSpinner = document.getElementById('aiDetectionSpinner');
+        const aiLoadingIndicator = document.getElementById('ai-loading-indicator');
+        const aiProgressBar = document.getElementById('ai-progress-bar');
+        const aiResultsContainer = document.getElementById('ai-results-container');
+        const resetAiDetection = document.getElementById('resetAiDetection');
+        const resultImage = document.getElementById('result-image');
+        const resultVerdict = document.getElementById('resultVerdict');
+        const resultAlert = document.getElementById('resultAlert');
+        const resultDetails = document.getElementById('resultDetails');
+        const resultRaw = document.getElementById('result-raw');
+        const analysisTime = document.getElementById('analysis-time');
+        
+        // Service tabs
+        const thehiveTab = document.getElementById('thehive-tab');
+        const faceonliveTab = document.getElementById('faceonlive-tab');
+        
+        // Current selected service
+        let currentService = 'thehive'; // Default service
+        
+        // Add event listeners for tab switching
+        thehiveTab.addEventListener('click', function() {
+            currentService = 'thehive';
+            console.log('Service switched to TheHive.ai');
+        });
+        
+        faceonliveTab.addEventListener('click', function() {
+            currentService = 'faceonlive';
+            console.log('Service switched to FaceOnLive');
+        });
+
+        // Format file size to human-readable format
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // File drop area highlight
+        ['dragenter', 'dragover'].forEach(eventName => {
+            fileDropArea.addEventListener(eventName, highlight, false);
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            fileDropArea.addEventListener(eventName, unhighlight, false);
+        });
+        
+        function highlight() {
+            fileDropArea.classList.add('is-active');
+        }
+        
+        function unhighlight() {
+            fileDropArea.classList.remove('is-active');
+        }
+
+        // File handling for drag & drop
+        fileDropArea.addEventListener('drop', handleDrop, false);
+        
+        function handleDrop(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                handleFiles(e.dataTransfer.files);
+            }
+        }
+
+        // File input change handler
+        fileInput.addEventListener('change', function() {
+            if (this.files && this.files[0]) {
+                handleFiles(this.files);
+            }
+        });
+
+        // Handle the selected files
+        function handleFiles(files) {
+            const file = files[0];
+            if (!file) return;
+            
+            // Check file type
+            if (!file.type.match('image.*')) {
+                alert('يرجى اختيار ملف صورة فقط');
+                return;
+            }
+            
+            // Display file info
+            fileNameDisplay.textContent = file.name;
+            fileSizeDisplay.textContent = formatFileSize(file.size);
+            
+            // Preview image
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                imagePreview.src = e.target.result;
+                imagePreviewContainer.classList.remove('d-none');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Remove file button
+        removeFileBtn.addEventListener('click', function() {
+            imagePreviewContainer.classList.add('d-none');
+            fileInput.value = '';
+            fileNameDisplay.textContent = '-';
+            fileSizeDisplay.textContent = '-';
+        });
+
+        // Reset detection button
+        resetAiDetection.addEventListener('click', function() {
+            resetDetection();
+        });
+        
+        // Check for pending image from video processing page
+        const checkPendingImage = function() {
+            const pendingImage = localStorage.getItem('pendingAiDetectionImage');
+            if (pendingImage) {
+                console.log('Found pending image from video processing page');
+                
+                // Display the image in preview
+                imagePreview.src = pendingImage;
+                imagePreviewContainer.classList.remove('d-none');
+                
+                // Create a file from the data URL
+                fetch(pendingImage)
+                    .then(res => res.blob())
+                    .then(blob => {
+                        // Create a File object
+                        const fileName = 'frame-from-video.jpg';
+                        const file = new File([blob], fileName, { type: 'image/jpeg' });
+                        
+                        // Create a DataTransfer to set the file input value
+                        const dataTransfer = new DataTransfer();
+                        dataTransfer.items.add(file);
+                        fileInput.files = dataTransfer.files;
+                        
+                        // Update file info
+                        fileNameDisplay.textContent = fileName;
+                        fileSizeDisplay.textContent = formatFileSize(blob.size);
+                        
+                        // Clear localStorage
+                        localStorage.removeItem('pendingAiDetectionImage');
+                        localStorage.removeItem('uploadedImage');
+                    })
+                    .catch(error => console.error('Error creating file from image data:', error));
+            }
+        };
+        
+        // Run on page load
+        checkPendingImage();
+        
+        function resetDetection() {
+            // Reset form and UI
+            aiDetectionForm.reset();
+            imagePreviewContainer.classList.add('d-none');
+            fileNameDisplay.textContent = '-';
+            fileSizeDisplay.textContent = '-';
+            aiResultsContainer.classList.add('d-none');
+            aiLoadingIndicator.classList.add('d-none');
+            aiProgressBar.style.width = '0%';
+            detectAiBtn.disabled = false;
+            aiDetectionSpinner.classList.add('d-none');
+        }
+        
+        // Form submission
+        aiDetectionForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Validate file input
+            if (!fileInput.files || !fileInput.files[0]) {
+                alert('يرجى اختيار صورة للتحليل');
+                return;
+            }
+            
+            // Set up form data
+            const formData = new FormData();
+            formData.append('image', fileInput.files[0]);
+            formData.append('service', currentService);
+            
+            // Show loading indicators
+            detectAiBtn.disabled = true;
+            aiDetectionSpinner.classList.remove('d-none');
+            aiLoadingIndicator.classList.remove('d-none');
+            aiResultsContainer.classList.add('d-none');
+            
+            // Start progress animation
+            let progress = 0;
+            const progressInterval = setInterval(function() {
+                if (progress < 90) {
+                    progress += Math.random() * 5;
+                    aiProgressBar.style.width = Math.min(progress, 90) + '%';
+                }
+            }, 800);
+            
+            // Set start time for tracking processing duration
+            const startTime = new Date();
+            
+            // Make AJAX request
+            const xhr = new XMLHttpRequest();
+            
+            // Choose the correct API endpoint based on selected service
+            const endpoint = currentService === 'thehive' ? '/api/ai-detection' : '/api/faceonlive-detection';
+            xhr.open('POST', endpoint, true);
+            
+            xhr.onload = function() {
+                clearInterval(progressInterval);
+                aiProgressBar.style.width = '100%';
+                
+                setTimeout(function() {
+                    aiLoadingIndicator.classList.add('d-none');
+                    aiResultsContainer.classList.remove('d-none');
+                    detectAiBtn.disabled = false;
+                    aiDetectionSpinner.classList.add('d-none');
+                    
+                    // Calculate and display analysis time
+                    const endTime = new Date();
+                    const timeDiff = (endTime - startTime) / 1000; // in seconds
+                    analysisTime.textContent = `${timeDiff.toFixed(1)} ثانية`;
+                    
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        
+                        // Set the result image
+                        resultImage.src = response.imageUrl || '';
+                        
+                        // Display raw results
+                        resultRaw.textContent = response.rawText || JSON.stringify(response, null, 2);
+                        
+                        // Handle results based on service
+                        if (currentService === 'thehive') {
+                            displayTheHiveResults(response);
+                        } else {
+                            displayFaceOnLiveResults(response);
+                        }
+                    } catch (error) {
+                        console.error('Error parsing results:', error);
+                        resultAlert.className = 'alert alert-danger mb-3';
+                        resultVerdict.textContent = 'حدث خطأ أثناء معالجة النتائج';
+                        resultDetails.innerHTML = `<p class="text-danger">لم نتمكن من تحليل الصورة. يرجى المحاولة مرة أخرى.</p>`;
+                    }
+                }, 500);
+            };
+            
+            xhr.onerror = function() {
+                clearInterval(progressInterval);
+                aiLoadingIndicator.classList.add('d-none');
+                detectAiBtn.disabled = false;
+                aiDetectionSpinner.classList.add('d-none');
+                alert('حدث خطأ أثناء الاتصال بالخادم. يرجى المحاولة لاحقاً.');
+            };
+            
+            xhr.send(formData);
+        });
+        
+        // Display TheHive.ai results (now using Sightengine API)
+        function displayTheHiveResults(response) {
+            console.log('Processing TheHive.ai/Sightengine results:', response);
+            
+            // Handle Sightengine API response format
+            let isAi = false;
+            let confidence = 0;
+            
+            // First check if we have direct is_ai flag from Sightengine
+            if (response.is_ai !== undefined) {
+                isAi = response.is_ai;
+                confidence = response.confidence !== undefined ? parseFloat(response.confidence) : 0;
+            } else {
+                // Fall back to original logic for backward compatibility
+                const aiGeneratedScore = response.ai_generated_score !== undefined ? parseFloat(response.ai_generated_score) : 0;
+                const notAiGeneratedScore = response.not_ai_generated_score !== undefined ? parseFloat(response.not_ai_generated_score) : 0;
+                const verdict = response.verdict || (aiGeneratedScore > notAiGeneratedScore ? 'ai' : 'not_ai');
+                isAi = verdict === 'ai';
+                confidence = response.confidence !== undefined ? parseFloat(response.confidence) : Math.max(aiGeneratedScore, notAiGeneratedScore);
+            }
+            
+            // Calculate percentages based on confidence
+            const aiScorePercent = isAi ? (confidence * 100).toFixed(2) + '%' : '0.00%';
+            const notAiScorePercent = !isAi ? (confidence * 100).toFixed(2) + '%' : '0.00%';
+            
+            // Set verdict and colors based on confidence threshold (>50%)
+            let verdictText, alertClass;
+            if (isAi || confidence > 0.5) {
+                verdictText = 'الصورة منتجة باستخدام الذكاء الاصطناعي';
+                alertClass = 'alert alert-warning';
+            } else {
+                verdictText = 'الصورة حقيقية (غير منشأة بالذكاء الاصطناعي)';
+                alertClass = 'alert alert-success';
+            }
+            
+            // Update UI
+            resultAlert.className = alertClass;
+            resultVerdict.textContent = verdictText;
+            
+            // Create confidence bars
+            let detailsHtml = `
+                <div class="mb-4">
+                    <h5 class="mb-3">تحليل الصورة:</h5>
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>تم إنشاؤها بواسطة الذكاء الاصطناعي</span>
+                            <strong>${aiScorePercent}</strong>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar bg-warning confidence-bar" style="width: ${aiScorePercent}"></div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>صورة حقيقية</span>
+                            <strong>${notAiScorePercent}</strong>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar bg-success confidence-bar" style="width: ${notAiScorePercent}"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Add the raw result from Sightengine if available
+            if (response.rawText && response.rawText.includes("AI-generated confidence:")) {
+                const aiConfidenceMatch = response.rawText.match(/AI-generated confidence: (\d+\.\d+)%/);
+                if (aiConfidenceMatch && aiConfidenceMatch[1]) {
+                    const confidenceValue = parseFloat(aiConfidenceMatch[1]).toFixed(2);
+                    detailsHtml += `
+                        <div class="p-2 bg-light border rounded mb-3">
+                            <code>AI-generated confidence: ${confidenceValue}%</code>
+                        </div>
+                    `;
+                }
+            }
+            
+            // Add model-specific scores if available
+            if (response.rawText) {
+                try {
+                    // Try to parse any model-specific scores from rawText
+                    let modelScores = {};
+                    
+                    // Check if rawText contains JSON data
+                    if (response.rawText.trim().startsWith('{')) {
+                        const parsed = JSON.parse(response.rawText);
+                        // Extract model scores
+                        for (const key in parsed) {
+                            if (key !== 'ai_generated' && key !== 'not_ai_generated' && 
+                                typeof parsed[key] === 'number') {
+                                modelScores[key] = parsed[key];
+                            }
+                        }
+                    }
+                    
+                    // Display model scores if we found any
+                    if (Object.keys(modelScores).length > 0) {
+                        detailsHtml += `
+                            <div class="mb-3">
+                                <h5 class="mb-3">نتائج النماذج المحددة:</h5>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>النموذج</th>
+                                                <th>نسبة الثقة</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                        `;
+                        
+                        // Sort models by confidence score (descending)
+                        const sortedModels = Object.entries(modelScores)
+                            .sort((a, b) => b[1] - a[1]);
+                        
+                        // Add each model to the table
+                        sortedModels.forEach(([model, score]) => {
+                            const scorePercent = (score * 100).toFixed(2) + '%';
+                            detailsHtml += `
+                                <tr>
+                                    <td>${model}</td>
+                                    <td>${scorePercent}</td>
+                                </tr>
+                            `;
+                        });
+                        
+                        detailsHtml += `
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        `;
+                    }
+                } catch (error) {
+                    console.error('Error parsing model scores:', error);
+                }
+            }
+            
+            resultDetails.innerHTML = detailsHtml;
+        }
+        
+        // Display FaceOnLive results
+        function displayFaceOnLiveResults(response) {
+            console.log('Processing FaceOnLive results:', response);
+            
+            // Extract data from response
+            const aiScore = response.ai_score !== undefined ? parseFloat(response.ai_score) : 0;
+            const realScore = response.real_score !== undefined ? parseFloat(response.real_score) : 0;
+            
+            // Parse raw results to find "No Deepfake" percentage
+            let noDeepfakePercentage = 0;
+            if (response.rawText) {
+                const noDeepfakeMatch = response.rawText.match(/No Deepfake:\s*(\d+)%/i);
+                if (noDeepfakeMatch && noDeepfakeMatch[1]) {
+                    noDeepfakePercentage = parseInt(noDeepfakeMatch[1]);
+                    console.log('Found No Deepfake percentage:', noDeepfakePercentage);
+                }
+            }
+            
+            // Format scores as percentages
+            const aiScorePercent = (aiScore * 100).toFixed(2) + '%';
+            const realScorePercent = (realScore * 100).toFixed(2) + '%';
+            const noDeepfakeScorePercent = noDeepfakePercentage + '%';
+            
+            // Set verdict and colors based on No Deepfake percentage
+            let verdictText, alertClass;
+            // If "No Deepfake" is > 50%, show as real image (as requested)
+            if (noDeepfakePercentage > 50) {
+                verdictText = 'الصورة حقيقية (غير منشأة بالذكاء الاصطناعي)';
+                alertClass = 'alert alert-success';
+            } else {
+                verdictText = 'الصورة منشاة باستخدام الذكاء الاصطناعي';
+                alertClass = 'alert alert-warning';
+            }
+            
+            // Update UI
+            resultAlert.className = alertClass;
+            resultVerdict.textContent = verdictText;
+            
+            // Create confidence bars
+            const detailsHtml = `
+                <div class="mb-4">
+                    <h5 class="mb-3">تحليل الصورة:</h5>
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>مزيفة / ذكاء اصطناعي</span>
+                            <strong>${aiScorePercent}</strong>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar bg-warning confidence-bar" style="width: ${aiScorePercent}"></div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>صورة حقيقية</span>
+                            <strong>${realScorePercent}</strong>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar bg-success confidence-bar" style="width: ${realScorePercent}"></div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>No Deepfake</span>
+                            <strong>${noDeepfakeScorePercent}</strong>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar bg-primary confidence-bar" style="width: ${noDeepfakeScorePercent}"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            resultDetails.innerHTML = detailsHtml;
+        }
+    });
+</script>
+{% endblock %}

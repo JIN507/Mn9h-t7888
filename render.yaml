@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: bahith-al-suwar
+    env: python
+    buildCommand: pip install -r requirements.txt && python -m playwright install chromium && playwright install-deps chromium
+    startCommand: gunicorn app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.12
+      - key: IMGBB_API_KEY
+        value: 8a0183d939bb1db66e0e505b80c758e6
+    autoDeploy: true
