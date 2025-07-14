@@ -46,7 +46,7 @@ UPLOAD_FOLDER = 'uploads'
 # Create uploads directory if it doesn't exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # Hard-coded IMGBB API key (you should move this to .env file in production)
-IMGBB_API_KEY = '8a0183d939bb1db66e0e505b80c758e6'
+IMGBB_API_KEY = '0a85906528efe824b2563d2ae563b68f'
 # AI or Not API Key for audio verification (updated from user input)
 AIORNOT_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjVjNDEyZDIxLTQ2MWUtNDc2My05ODVmLWQzZjI2NmY5Y2JlMCIsInVzZXJfaWQiOiI1YzQxMmQyMS00NjFlLTQ3NjMtOTg1Zi1kM2YyNjZmOWNiZTAiLCJhdWQiOiJhY2Nlc3MiLCJleHAiOjAuMH0.w-D35bZii8-wpZZig397pzfHUReAFnBTuKSQBjOI7cA'
 # Setting environment variable as in the example
@@ -80,6 +80,62 @@ def allowed_audio_file(filename):
 # First implementation of upload_to_imgbb has been removed
 # Using the improved version defined at line ~1404
 
+# Video processing functions
+def extract_frames_from_video(video_path, frame_interval):
+    """Extract frames from video file at specified intervals"""
+    try:
+        # Open the video file
+        video = cv2.VideoCapture(video_path)
+        
+        # Check if video opened successfully
+        if not video.isOpened():
+            print("Error: Could not open video file")
+            return []
+        
+        # Get video properties
+        fps = video.get(cv2.CAP_PROP_FPS)
+        total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps if fps > 0 else 0
+        
+        # Calculate frame interval in frames
+        frame_interval_sec = int(frame_interval)  # Convert to integer seconds
+        frame_interval_frames = int(fps * frame_interval_sec)
+        
+        # Ensure we extract at least one frame
+        if frame_interval_frames <= 0:
+            frame_interval_frames = 1
+        
+        frames = []
+        frame_count = 0
+        
+        while True:
+            # Read the next frame
+            success, frame = video.read()
+            
+            # Break the loop if we've reached the end of the video
+            if not success:
+                break
+            
+            # Extract frame at specified interval
+            if frame_count % frame_interval_frames == 0:
+                # Convert frame to base64 encoded string
+                _, buffer = cv2.imencode('.jpg', frame)
+                img_str = base64.b64encode(buffer).decode('utf-8')
+                frames.append({
+                    'data': f'data:image/jpeg;base64,{img_str}',
+                    'timestamp': frame_count / fps if fps > 0 else 0
+                })
+            
+            frame_count += 1
+        
+        # Release the video file
+        video.release()
+        
+        return frames
+    except Exception as e:
+        print(f"Error extracting frames: {str(e)}")
+        return []
+
 def download_image(url, path):
     try:
         response = requests.get(url, timeout=10)
@@ -104,477 +160,6 @@ EXTENSION_PATH = os.path.join(BASE_DIR, "yescaptcha-extension")
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 USER_DATA_DIR = os.path.join(BASE_DIR, "user-data")
 
-def scrape_thehive(image_url):
-    print(f'[*] Starting AI detection for image: {image_url}')
-    
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    temp_image_path = os.path.join(UPLOAD_FOLDER, "temp_upload.jpg")
-    
-    download_success = download_image(image_url, temp_image_path)
-    
-    if not download_success or not os.path.exists(temp_image_path):
-        return {
-            'rawText': f'خطأ: فشل تحميل الصورة من الرابط المحدد',
-            'source': 'Error',
-            'error': 'Failed to download image',
-            'imageUrl': image_url
-        }
-        
-    with sync_playwright() as playwright:
-        try:
-            print('[*] Launching browser...')
-
-            try:
-                context = playwright.chromium.launch_persistent_context(
-                    user_data_dir=USER_DATA_DIR,
-                    headless=True,
-                    args=[
-                        f"--disable-extensions-except={EXTENSION_PATH}",
-                        f"--load-extension={EXTENSION_PATH}",
-                        "--no-sandbox",
-                        "--disable-setuid-sandbox"
-                    ]
-                )
-                print('[✓] Browser launched with extension')
-            except Exception as browser_error:
-                print(f'[!] Extension failed, using browser without extension')
-                context = playwright.chromium.launch_persistent_context(
-                    user_data_dir=USER_DATA_DIR,
-                    headless=False,
-                    args=[
-                        "--no-sandbox",
-                        "--disable-setuid-sandbox"
-                    ]
-                )
-
-            page = context.new_page()
-
-            print('[*] Opening TheHive.ai...')
-            page.goto("https://thehive.ai/demos/ai-generated-content-detection", wait_until='load' )
-
-            print('[*] Waiting for the page to fully load...')
-            page.wait_for_load_state('networkidle')  # انتظار اكتمال تحميل الصفحة
-            page.wait_for_timeout(1000)  # انتظار أقل لتسريع العملية
-            
-            # النقر على زر "Upload an image" أولاً - تحسين وتبسيط
-            print('[*] Looking for Upload button...')
-            try:
-                # أولاً نفحص إذا كان الزر موجوداً بالنص
-                upload_button_visible = False
-                if page.locator('button:text("/upload/i")').count() > 0:
-                    print('[*] Found Upload button by text regex')
-                    page.locator('button:text("/upload/i")').first.click(force=True)
-                    upload_button_visible = True
-                # إذا لم نجد بالطريقة الأولى نستخدم JavaScript
-                if not upload_button_visible:
-                    print('[*] Using JavaScript to find and click Upload button')
-                    clicked = page.evaluate('''() => {
-                        // نبحث عن أي زر يحتوي على كلمة upload بأي حالة
-                        const buttons = Array.from(document.querySelectorAll('button'));
-                        const uploadBtn = buttons.find(btn => 
-                            btn.textContent && 
-                            (btn.textContent.toLowerCase().includes('upload') || 
-                             btn.innerText.toLowerCase().includes('upload')));
-                        if (uploadBtn) {
-                            console.log('Found upload button with text: ' + uploadBtn.textContent);
-                            uploadBtn.click();
-                            return true;
-                        }
-                        // لم نجد زراً بالنص، نبحث عن زر به رمز رفع
-                        const iconButtons = Array.from(document.querySelectorAll('button'));
-                        for (const btn of iconButtons) {
-                            if (btn.querySelector('svg') || btn.querySelector('i')) {
-                                console.log('Found button with icon');
-                                btn.click();
-                                return true;
-                            }
-                        }
-                        return false;
-                    }''')
-                    if clicked:
-                        print('[✓] Successfully clicked upload button with JavaScript')
-                        upload_button_visible = True
-                    else:
-                        print('[!] Could not find upload button with JavaScript')
-                
-
-                # النقر على زر "Upload an image" أولاً
-                if page.locator('button:has-text("Upload an image")').count() > 0:
-                    print('[*] Found Upload button by text - clicking it')
-                    page.locator('button:has-text("Upload an image")').click(force=True)
-                    page.wait_for_timeout(1500)  # انتظار أقل لظهور حقل إدخال الملف
-                
-                # رفع الملف بالطريقة القديمة مع تحسينات للسرعة
-                print('[*] Uploading file...')
-                try:
-                    # محاولة العثور على حقل إدخال الملف وتعيين الملف
-                    file_input = page.locator('input[type="file"]').first
-                    file_input.set_input_files(temp_image_path)
-                    print('[✓] File uploaded successfully')
-                    page.wait_for_timeout(2500)  # انتظار لمعالجة الملف - مخفض من 5000ms الأصلية
-                except Exception as upload_error:
-                    print(f'[!] Error uploading file: {str(upload_error)}')
-                
-                # انتظار أقصر بعد الرفع لتسريع العملية
-                print('[*] Waiting for file processing...')
-                page.wait_for_timeout(3000)  # تقليل وقت الانتظار لتسريع العملية
-
-                # التحقق من ظهور النتائج أولاً
-                print('[*] Checking for results before CAPTCHA...')
-                try:
-                    # فحص سريع للتحقق من وجود النتائج بالفعل
-                    has_results = page.evaluate('''() => {
-                        // التحقق من وجود النتائج في الصفحة
-                        const content = document.body.innerText;
-                        return content.includes('AI Generated') && content.includes('Not AI Generated') && 
-                               (content.includes('0.') || content.includes('1.'));
-                    }''')
-                    
-                    if has_results:
-                        print('[✓] Results already visible, skipping CAPTCHA check')
-                    else:
-                        # الانتظار لحل الكابتشا ثم النقر على زر Continue
-                        print('[*] Results not found, waiting for CAPTCHA to be solved...')
-                        try:
-                            page.wait_for_timeout(2000)  # تقليل وقت الانتظار للكابتشا
-                            if page.locator('button:has-text("Continue")').count() > 0:
-                                print('[*] Found CAPTCHA Continue button, clicking it...')
-                                page.locator('button:has-text("Continue")').click(force=True)
-                                print('[✓] Successfully clicked CAPTCHA Continue button')
-                                page.wait_for_timeout(1000)  # تقليل وقت الانتظار بعد النقر
-                        except Exception as captcha_error:
-                            print(f'[!] Error handling CAPTCHA: {str(captcha_error)}')
-                except Exception as results_check_error:
-                    print(f'[!] Error checking for results: {str(results_check_error)}')
-
-            except Exception as upload_error:
-                print(f'[!] Error uploading file: {str(upload_error)}')
-
-            print('[*] Waiting for results...')
-            try:
-                # انتظار أقل للنتائج مع فحص الصفحة بشكل دوري
-                # انتظار مع فحص كل ثانيتين للتحقق من وجود النتائج
-                max_wait_time = 30  # الحد الأقصى للانتظار 30 ثانية
-                check_interval = 2  # التحقق كل ثانيتين
-                wait_time = 0
-                
-                while wait_time < max_wait_time:
-                    # فحص وجود النتائج - تحديث للتحقق من الشكل الجديد للنتائج
-                    has_results = page.evaluate('''() => {
-                        const content = document.body.innerText;
-                        // Check for traditional format
-                        const hasOldFormat = content.includes('AI Generated') && content.includes('Not AI Generated') && 
-                               (content.includes('0.') || content.includes('1.'));
-                        
-                        // Check for new JSON format
-                        const hasJsonFormat = content.includes('not_ai_generated') && content.includes('ai_generated') && 
-                               content.includes('Confidence Score');
-                               
-                        return hasOldFormat || hasJsonFormat;
-                    }''')
-                    
-                    if has_results:
-                        print(f'[✓] Results found after {wait_time} seconds!')
-                        break
-                    
-                    page.wait_for_timeout(check_interval * 1000)
-                    wait_time += check_interval
-                    print(f'[*] Waiting for results... ({wait_time}s/{max_wait_time}s)')
-                
-                print('[*] Extracting results text...')
-                # Get the page content
-                raw_text = page.content()
-                print('[*] Raw content length:', len(raw_text))
-
-                # Default scores
-                ai_generated_score = "0.00"
-                not_ai_generated_score = "0.00"
-                none_score = "0.00"
-                
-                # Initialize detailed_results here to avoid access error
-                detailed_results = {
-                    'ai_generated': 0.0,
-                    'not_ai_generated': 0.0,
-                    'none': 0.0
-                }
-                
-                # Extract scores using both methods for redundancy
-                
-                # Extract results based on the new table format from TheHive.ai
-                try:
-                    print('[*] Extracting results from new table format...')
-                    js_extracted_scores = page.evaluate('''() => {
-                        // Try to extract data directly from the Class/Confidence Score table
-                        try {
-                            // Get all table rows
-                            const tableRows = Array.from(document.querySelectorAll('.MuiTypography-root-110'));
-                            if (tableRows.length > 0) {
-                                const results = {};
-                                // Look for the class names and scores
-                                for (let i = 0; i < tableRows.length; i++) {
-                                    const text = tableRows[i].textContent.trim();
-                                    if (text === 'not_ai_generated' || text === 'ai_generated' || text === 'none') {
-                                        const className = text;
-                                        // The next element should be the score
-                                        if (i + 1 < tableRows.length) {
-                                            const scoreText = tableRows[i + 1].textContent.trim();
-                                            const score = parseFloat(scoreText) || 0;
-                                            results[className] = score.toFixed(2);
-                                        }
-                                    }
-                                }
-                                
-                                if (Object.keys(results).length > 0) {
-                                    console.log('Found results in table:', results);
-                                    return { ...results, format: 'new_table' };
-                                }
-                            }
-                        } catch (e) {
-                            console.error('Error extracting from table:', e);
-                        }
-                        
-                        // If we reach here, try older formats
-                        try {
-                            // Try to find the table with results (fallback method)
-                            const rows = Array.from(document.querySelectorAll('tr'));
-                            if (rows.length > 0) {
-                                const results = {};
-                                for (const row of rows) {
-                                    const cells = Array.from(row.querySelectorAll('td'));
-                                    if (cells.length >= 2) {
-                                        const className = cells[0].textContent.trim();
-                                        const score = cells[1].textContent.trim();
-                                        if (className && score) {
-                                            results[className] = score;
-                                        }
-                                    }
-                                }
-                                if (Object.keys(results).length > 0) {
-                                    return { ...results, format: 'new' };
-                                }
-                            }
-                        } catch (e) {
-                            console.error('Error extracting from tr/td:', e);
-                        }
-                        
-                        // If still nothing, fall back to the oldest format
-                        const aiScoreElement = document.querySelector('*:contains("AI Generated")');
-                        const notAiScoreElement = document.querySelector('*:contains("Not AI Generated")');
-                        
-                        let aiScore = '0.00';
-                        let notAiScore = '0.00';
-                        
-                        if (aiScoreElement) {
-                            const aiText = aiScoreElement.textContent;
-                            const aiMatch = aiText.match(/([0-9]+\.[0-9]+)/);
-                            if (aiMatch) aiScore = aiMatch[0];
-                        }
-                        
-                        if (notAiScoreElement) {
-                            const notAiText = notAiScoreElement.textContent;
-                            const notAiMatch = notAiText.match(/([0-9]+\.[0-9]+)/);
-                            if (notAiMatch) notAiScore = notAiMatch[0];
-                        }
-                        
-                        return { ai_generated: aiScore, not_ai_generated: notAiScore, format: 'old' };
-                    }''')
-                    
-                    print('[*] Extracted scores:', js_extracted_scores)
-                    
-                    # Handle all formats - both old and new
-                    print('[*] Processing extracted scores from format:', js_extracted_scores.get('format', 'unknown'))
-                    
-                    # Initialize scores with defaults
-                    ai_generated_score = '0.00'
-                    not_ai_generated_score = '0.00'
-                    none_score = '0.00'
-                    
-                    # Extract scores based on their keys
-                    for key, value in js_extracted_scores.items():
-                        if key == 'format':
-                            continue
-                            
-                        # Try to convert the value to a string if it's not already
-                        if not isinstance(value, str):
-                            try:
-                                value = str(value)
-                            except:
-                                value = '0.00'
-                                
-                        key_lower = key.lower()
-                        
-                        # Handle exact key matches first
-                        if key_lower == 'ai_generated':
-                            ai_generated_score = value
-                        elif key_lower == 'not_ai_generated':
-                            not_ai_generated_score = value
-                        elif key_lower == 'none':
-                            none_score = value
-                        # Handle approximate matches
-                        elif 'ai' in key_lower and 'not' not in key_lower and 'generated' in key_lower:
-                            ai_generated_score = value
-                        elif 'not' in key_lower and 'ai' in key_lower:
-                            not_ai_generated_score = value
-                    
-                    print(f'[*] Extracted scores - AI: {ai_generated_score}, Not AI: {not_ai_generated_score}, None: {none_score}')
-                except Exception as js_error:
-                    print(f'[!] Error extracting scores with JS: {str(js_error)}')
-                
-                # Fallback to regex method if JS method fails
-                if ai_generated_score == '0.00' and not_ai_generated_score == '0.00':
-                    print('[*] Falling back to regex method...')
-                    ai_pattern = r'AI Generated\s*<[^>]+>\s*([0-9.]+)'
-                    not_ai_pattern = r'Not AI Generated\s*<[^>]+>\s*([0-9.]+)'
-                    
-                    # New patterns for the table format
-                    table_ai_pattern = r'ai_generated[\s\S]*?([0-9]\.[0-9]+)'
-                    table_not_ai_pattern = r'not_ai_generated[\s\S]*?([0-9]\.[0-9]+)'
-                    
-                    ai_matches = re.findall(ai_pattern, raw_text) or re.findall(table_ai_pattern, raw_text)
-                    not_ai_matches = re.findall(not_ai_pattern, raw_text) or re.findall(table_not_ai_pattern, raw_text)
-                    
-                    if ai_matches:
-                        ai_generated_score = ai_matches[0]
-                    
-                    if not_ai_matches:
-                        not_ai_generated_score = not_ai_matches[0]
-                
-                print(f'[✓] AI Generated score: {ai_generated_score}')
-                print(f'[✓] Not AI Generated score: {not_ai_generated_score}')
-
-                # Convert scores to float
-                ai_generated_float = float(ai_generated_score)
-                not_ai_generated_float = float(not_ai_generated_score)
-
-                # Determine verdict
-                verdict = "uncertain"
-                confidence = 0.0
-
-                if not_ai_generated_float >= 0.49:
-                    verdict = "real"
-                    confidence = not_ai_generated_float
-                elif ai_generated_float >= 0.49:
-                    verdict = "ai_generated"
-                    confidence = ai_generated_float
-                
-                # Format results to match what the frontend expects (line by line format)
-                # The frontend expects a format like: ai_generated\n0.XX\nnot_ai_generated\n0.XX
-                
-                # Start with the essential scores - ensure we're using actual numbers, not HTML or JS
-                try:
-                    # Clean the scores to ensure they're just numbers
-                    ai_score_clean = float(ai_generated_score.strip().replace('%', ''))
-                    not_ai_score_clean = float(not_ai_generated_score.strip().replace('%', ''))
-                    
-                    # Format with exactly 2 decimal places
-                    ai_generated_score = f"{ai_score_clean:.2f}"
-                    not_ai_generated_score = f"{not_ai_score_clean:.2f}"
-                except (ValueError, TypeError):
-                    # If conversion fails, use defaults
-                    ai_generated_score = "0.00"
-                    not_ai_generated_score = "0.00"
-                    
-                # Create the properly formatted result text
-                result_text = f"ai_generated\n{ai_generated_score}\nnot_ai_generated\n{not_ai_generated_score}"
-                
-                # Add 'none' score if available (common in new format)
-                if none_score != '0.00':
-                    result_text += f"\nnone\n{none_score}"
-                
-                # Add any additional classes from the extracted scores
-                for key, value in js_extracted_scores.items():
-                    if key not in ['format', 'ai_generated', 'not_ai_generated', 'none']:
-                        # Only add if it's a valid class with a numeric score
-                        try:
-                            # Make sure the value is numeric
-                            float_value = float(value)
-                            # Format with 2 decimal places
-                            formatted_value = f"{float_value:.2f}"
-                            result_text += f"\n{key}\n{formatted_value}"
-                        except (ValueError, TypeError):
-                            # Skip if the value isn't a valid number
-                            pass
-                            
-                print(f'[*] Formatted result text for frontend parsing:\n{result_text}')
-                
-                # Create a clean formatted output for detailed results
-                detailed_results = {
-                    'ai_generated': float(ai_generated_score),
-                    'not_ai_generated': float(not_ai_generated_score)
-                }
-                
-                # Add any additional classes found
-                for key, value in js_extracted_scores.items():
-                    if key not in ['format', 'ai_generated', 'not_ai_generated']:
-                        try:
-                            detailed_results[key] = float(value)
-                        except (ValueError, TypeError):
-                            pass
-            except Exception as results_error:
-                print(f'[!] Error processing results: {str(results_error)}')
-                verdict = "error"
-                confidence = 0.0
-
-            # التقاط لقطة شاشة للنتائج قبل إغلاق المتصفح
-            screenshot_path = os.path.join(UPLOAD_FOLDER, 'hive_result.png')
-            page.screenshot(path=screenshot_path)
-            print(f'[✓] Screenshot saved: {screenshot_path}')
-            
-            # هام: تأكيد الحصول على النتائج بشكل صحيح قبل إغلاق المتصفح
-            print('[*] Finalizing results and preparing return data...')
-            
-            # التأكد من وجود بيانات نتائج بشكل مناسب للعرض في واجهة المستخدم
-            # Convert detailed results to nicely formatted text for display
-            detailed_text = json.dumps(detailed_results, indent=2, ensure_ascii=False)
-            
-            # Format the rawText to be the properly formatted JSON instead of JS code
-            if raw_text and '</style>' in raw_text:
-                # Cut off the HTML/JS part and just show the classification results
-                raw_text = detailed_text
-            
-            results = {
-                'rawText': raw_text,
-                'source': 'TheHive.ai',
-                'verdict': verdict,
-                'confidence': confidence,
-                'ai_generated_score': ai_generated_score,
-                'not_ai_generated_score': not_ai_generated_score,
-                'imageUrl': image_url,
-                'screenshot_path': screenshot_path, # إضافة مسار لقطة الشاشة للعرض في حالة الضرورة
-                'result_text': result_text  # إضافة النص المنسق للتحليل
-            }
-            
-            print('[✓] Results data prepared successfully:')
-            print(f'   - Verdict: {verdict}')
-            print(f'   - Confidence: {confidence:.2f}')
-            print(f'   - AI Generated Score: {ai_generated_score}')
-            print(f'   - Not AI Generated Score: {not_ai_generated_score}')
-            
-            # إغلاق المتصفح بعد التأكد من الحصول على النتائج
-            context.close()
-            print('[✓] Browser closed successfully')
-            
-            # تنظيف الملفات المؤقتة
-            try:
-                if os.path.exists(temp_image_path):
-                    os.remove(temp_image_path)
-                    print('[✓] Temporary files cleaned up')
-            except Exception as cleanup_error:
-                print(f'[!] Warning: Could not clean up temporary files: {str(cleanup_error)}')
-            
-            print('[✓] DONE: Returning final results to application')
-            return results
-
-        except Exception as e:
-            print(f'[!] Error: {str(e)}')
-            return {
-                'rawText': f'خطأ أثناء التحليل: {str(e)}',
-                'source': 'Error',
-                'error': str(e),
-                'imageUrl': image_url
-            }
-        finally:
-            print('[*] Playwright session finished')
 
 
 
@@ -697,195 +282,71 @@ def search_images(image_url):
         'tineye': f"https://tineye.com/search?url={image_url}"
     }
 
+ZENSERP_API_KEY = "54f49710-57fb-11f0-b038-cf26fb8f0bad"
+
 def scrape_reverse_search(image_url):
-    """Scrape TheHive.ai reverse image search results"""
-    print(f"[*] Starting reverse image search for: {image_url}")
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    temp_image_path = os.path.join(UPLOAD_FOLDER, "temp_upload.jpg")
-
-    if not download_image(image_url, temp_image_path):
-        return {'error': 'Failed to download image'}
-
-    with sync_playwright() as p:
+    try:
+        print(f'[*] Starting reverse image search for: {image_url}')
+        
+        # Generate search links for different engines
+        search_links = search_images(image_url)
+        
+        # Use ZenSerp API for direct search results
+        zenserp_key = os.getenv('ZENSERP_API_KEY') or ZENSERP_API_KEY
+        headers = {'apikey': zenserp_key}
+        params = {'image_url': image_url}
+        
         try:
-            # Determine whether to use YesCaptcha extension based on environment variable
-            use_extension = os.environ.get('USE_CAPTCHA_EXTENSION', 'True').lower() == 'true'
-            extension_args = []
-            if use_extension and EXTENSION_PATH:
-                extension_args = [
-                    f"--disable-extensions-except={EXTENSION_PATH}",
-                    f"--load-extension={EXTENSION_PATH}"
-                ]
-            
-            context = p.chromium.launch_persistent_context(
-                user_data_dir=USER_DATA_DIR,
-                headless=True,
-                args=[
-                    *extension_args,
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--start-maximized"
-                ]
+            print('[*] Querying ZenSerp API for reverse image search')
+            response = requests.get(
+                'https://app.zenserp.com/api/v2/search',
+                headers=headers,
+                params=params,
+                timeout=15
             )
-            page = context.new_page()
-            print("[*] Navigating to reverse image search...")
-            page.goto("https://thehive.ai/demos/reverse-image-search", wait_until="load")
-            page.wait_for_timeout(4000)
-
-            # Handle captcha continue button if exists
-            if page.locator('button:has-text("Continue")').count() > 0:
-                print("[*] CAPTCHA continue button found, clicking...")
-                page.locator('button:has-text("Continue")').click()
-                page.wait_for_timeout(2000)
-
-            # Click Upload button
-            print("[*] Clicking Upload button...")
-            upload_btn = page.locator('button:has-text("Upload")')
-            if upload_btn.count() > 0:
-                upload_btn.click()
-                page.wait_for_timeout(1000)
-            else:
-                raise Exception("Upload button not found")
-
-            # Set file input
-            file_input = page.locator('input[type="file"]')
-            file_input.set_input_files(temp_image_path)
-            print("[*] File uploaded")
-
-            page.wait_for_timeout(8000)  # Wait for result to appear
-            try:
-                    # فحص سريع للتحقق من وجود النتائج بالفعل
-                    has_results = page.evaluate(r'''() => {
-                        // التحقق من وجود النتائج في الصفحة
-                        const content = document.body.innerText;
-                        return content.includes('AI Generated') && content.includes('Not AI Generated') && 
-                               (content.includes('0.') || content.includes('1.'));
-                    }''')
-                    
-                    if has_results:
-                        print('[✓] Results already visible, skipping CAPTCHA check')
-                    else:
-                        # الانتظار لحل الكابتشا ثم النقر على زر Continue
-                        print('[*] Results not found, waiting for CAPTCHA to be solved...')
-                        try:
-                            page.wait_for_timeout(2000)  # تقليل وقت الانتظار للكابتشا
-                            if page.locator('button:has-text("Continue")').count() > 0:
-                                print('[*] Found CAPTCHA Continue button, clicking it...')
-                                page.locator('button:has-text("Continue")').click(force=True)
-                                print('[✓] Successfully clicked CAPTCHA Continue button')
-                                page.wait_for_timeout(1000)  # تقليل وقت الانتظار بعد النقر
-                        except Exception as captcha_error:
-                            print(f'[!] Error handling CAPTCHA: {str(captcha_error)}')
-            except Exception as results_check_error:
-                    print(f'[!] Error checking for results: {str(results_check_error)}')
-
-            except Exception as upload_error:
-                print(f'[!] Error uploading file: {str(upload_error)}')
-
-            page.wait_for_timeout(8000)
-            # Extract result box contents using a more flexible approach
-            print("[*] Extracting result links...")
             
-            # استخراج جميع الروابط من الصفحة
-            print("[*] Trying to extract links using JavaScript...")
-            try:
-                hrefs = page.evaluate("""
-                () => {
-                    // استخراج جميع الروابط من القسم الرئيسي
-                    const mainContainer = document.querySelector("[class*='jss'][class*='MuiBox'][class*='jss']")
-                        || document.querySelector("[class*='MuiBox']")
-                        || document.body;
-                        
-                    // البحث عن جميع الروابط داخل العنصر الرئيسي
-                    const links = Array.from(mainContainer.querySelectorAll('a[href]'));
-                    
-                    // تصفية الروابط وإعادة الـ href فقط
-                    return links
-                        .map(link => link.href)
-                        .filter(href => {
-                            // استبعاد روابط TheHive نفسه والروابط الداخلية
-                            return !href.includes('thehive.ai') && 
-                                   !href.startsWith('#') &&
-                                   !href.includes('javascript:');
-                        });
+            if response.status_code == 200:
+                data = response.json()
+                organic = data.get('reverse_image_results', {}).get('organic', [])
+                links = [r['url'] for r in organic if r.get('url')]
+                
+                print(f'[*] Found {len(links)} results from ZenSerp API')
+                return {
+                    'links': links,
+                    'search_urls': search_links,
+                    'source': 'ZenSerp API',
+                    'success': True
                 }
-                """)
-                
-                print(f"[*] Found {len(hrefs)} links using JavaScript")
-            except Exception as js_error:
-                print(f"[!] JavaScript extraction failed: {js_error}")
-                # خطة بديلة: استخدام طريقة playwright المباشرة
-                try:
-                    # تجربة مجموعة من المحددات للعثور على الروابط
-                    selectors = [
-                        "div[class*='jss'] a[href]",
-                        "div[class*='MuiBox'] a[href]",
-                        "#root div a[href]",
-                        "a[href]"
-                    ]
-                    
-                    for selector in selectors:
-                        links = page.locator(selector)
-                        if links.count() > 0:
-                            hrefs = [link.get_attribute('href') for link in links.all() if link.get_attribute('href')]
-                            hrefs = [href for href in hrefs if 'thehive.ai' not in href and not href.startswith('#')]
-                            print(f"[*] Found {len(hrefs)} links using selector {selector}")
-                            break
-                    else:
-                        print("[!] Could not find any links using any selectors")
-                        hrefs = []
-                except Exception as selector_error:
-                    print(f"[!] Selector-based extraction failed: {selector_error}")
-                    hrefs = []
-            
-            # طباعة الروابط التي تم العثور عليها
-            for i, href in enumerate(hrefs):
-                print(f"[{i+1}] {href}")
-                
-            # التقاط لقطة شاشة للتشخيص إذا لم نجد أي روابط
-            if not hrefs:
-                print("[!] No links found, taking screenshot for diagnosis")
-                screenshot_path = os.path.join(UPLOAD_FOLDER, "debug_screenshot.png")
-                page.screenshot(path=screenshot_path)
-                print(f"[*] Screenshot saved to {screenshot_path}")
-                
-                # تجربة تحليل HTML مباشرة للتشخيص
-                html_content = page.content()
-                print(f"[*] Page HTML content length: {len(html_content)}")
-                print(f"[*] HTML preview: {html_content[:500]}...")
-                
-                # محاولة استخراج أي شيء يبدو كرابط من HTML
-                import re
-                urls = re.findall(r'href=[\"\']?([^\"\'> ]+)', html_content)
-                print(f"[*] URLs found in HTML: {urls[:10]}")
-                
-                # اختيار الروابط الخارجية فقط
-                external_urls = [url for url in urls if not url.startswith('#') and 'thehive.ai' not in url and not url.startswith('javascript:')]
-                if external_urls:
-                    print(f"[*] Found {len(external_urls)} potential external links in HTML")
-                    hrefs = external_urls
-
-            context.close()
-            
-            # Clean up temporary files
-            try:
-                if os.path.exists(temp_image_path):
-                    os.remove(temp_image_path)
-                    print("[✓] Temporary files cleaned up")
-            except Exception as cleanup_error:
-                print(f"[!] Warning: Could not clean up temporary files: {str(cleanup_error)}")
-
-            return {'links': hrefs, 'source': 'TheHive Reverse Image Search'}
-
+            else:
+                print(f'[!] ZenSerp API error: {response.status_code}')
+                return {
+                    'links': [],
+                    'search_urls': search_links,
+                    'source': 'Search Engine Links',
+                    'error': f'ZenSerp API error: {response.status_code}',
+                    'success': True
+                }
+        
         except Exception as e:
-            print(f"[!] Error: {str(e)}")
-            # Clean up temporary files in case of error
-            try:
-                if os.path.exists(temp_image_path):
-                    os.remove(temp_image_path)
-            except:
-                pass
-            return {'error': str(e)}
+            print(f'[!] Error with ZenSerp API: {e}')
+            traceback.print_exc()
+            return {
+                'links': [],
+                'search_urls': search_links,
+                'source': 'Search Engine Links (API Failed)',
+                'error': str(e),
+                'success': True
+            }
+
+    except Exception as e:
+        print(f'[!] Error in image source search: {e}')
+        traceback.print_exc()
+        return {
+            'links': [],
+            'search_urls': {},
+            'error': str(e),
+            'success': False
+        }
 
 def extract_frames(video_file, frame_interval=2):
     """Extract frames from video file at specified time intervals"""
@@ -926,8 +387,55 @@ def index():
     return render_template('index.html')
 
 @app.route('/video')
-def video():
+def video_page():
+    """Render the video frame extraction page"""
     return render_template('video.html')
+
+@app.route('/api/extract-frames', methods=['POST'])
+def extract_frames_api():
+    """API endpoint to extract frames from uploaded video"""
+    # Check if a file was uploaded
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    
+    file = request.files['file']
+    
+    # Check if the file is empty
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    # Get frame interval parameter with default value of 2 seconds
+    frame_interval = request.form.get('frameInterval', '2')
+    
+    # Create a unique filename
+    filename = secure_filename(file.filename)
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    unique_filename = f"{timestamp}_{filename}"
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+    
+    # Save the uploaded file
+    file.save(file_path)
+    
+    try:
+        # Extract frames from the video
+        frames = extract_frames_from_video(file_path, frame_interval)
+        
+        # Delete the uploaded file after processing
+        os.remove(file_path)
+        
+        return jsonify({
+            'success': True,
+            'frames': frames,
+            'frameCount': len(frames)
+        })
+    except Exception as e:
+        # Delete the uploaded file if an error occurs
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        
+        return jsonify({
+            'error': str(e)
+        }), 500
 
 @app.route('/about')
 def about():
@@ -1074,9 +582,9 @@ def api_ai_detection():
             'success': False
         }), 400
     
-    # Get the service type from the form data - thehive (default) or faceonlive
-    service_type = request.form.get('service_type', 'thehive')
-    print(f'[*] Service type requested: {service_type}')
+    # Get the service from the form data - thehive (Model 1) or aiornot (Model 2)
+    service = request.form.get('service', 'thehive')
+    print(f'[*] Service requested: {service}')
     
     # Create upload directory if it doesn't exist
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -1105,46 +613,45 @@ def api_ai_detection():
     
     try:
         print('[DEBUG] Inside api_ai_detection try block')
-        # Print the service type being requested
-        print(f'[DEBUG] Service type requested: {service_type}')
+        # Print the service being requested
+        print(f'[DEBUG] Service requested: {service}')
         result = None
         
+        # Upload file to imgbb to get URL for both services
+        print('[*] Uploading image to ImgBB...')
+        with open(temp_path, 'rb') as f:
+            image_data = base64.b64encode(f.read()).decode('utf-8')
+            
+        image_url = upload_to_imgbb(image_data)
+        if not image_url:
+            print('[!] Failed to get image URL from ImgBB')
+            return jsonify({
+                'error': 'فشل في رفع الصورة للتحليل',
+                'success': False
+            }), 500
+            
+        print(f'[✓] Image uploaded to ImgBB: {image_url}')
+        
         # Process based on selected service
-        if service_type.lower() == 'thehive':
-            # For TheHive, we need to upload to ImgBB first to get a public URL
-            print('[*] Processing with TheHive.ai service')
+        if service.lower() == 'thehive':
+            # Model 1: Sightengine API (formerly TheHive.ai)
+            print('[*] Processing with Model 1 (Sightengine API)')
             
-            # Upload file to imgbb to get URL
-            print('[*] Uploading image to ImgBB...')
-            with open(temp_path, 'rb') as f:
-                image_data = base64.b64encode(f.read()).decode('utf-8')
-                
-            image_url = upload_to_imgbb(image_data)
-            if not image_url:
-                print('[!] Failed to get image URL from ImgBB')
-                return jsonify({
-                    'error': 'فشل في رفع الصورة للتحليل',
-                    'success': False
-                }), 500
-                
-            print(f'[✓] Image uploaded to ImgBB: {image_url}')
-            
-            # Add a print statement to verify we're calling the scraper
-            print('[DEBUG] About to call TheHive.ai scraper with URL:', image_url)
-            
-            # Force browser visibility
-            os.environ['PLAYWRIGHT_FORCE_VISIBLE'] = '1'
-            
-            # Explicitly wait to give time to debug
-            print('[DEBUG] Waiting 2 seconds before starting scraper...')
-            time.sleep(2)
-            
-            # Call the TheHive.ai scraper with the image URL
-            print('[*] Starting TheHive.ai scraper...')
+            # Call the Sightengine API with the image URL
+            print('[*] Starting Sightengine scraper...')
             result = scrape_thehive(image_url)
-            print('[DEBUG] TheHive.ai scraper returned:', result)
+            print('[DEBUG] Sightengine scraper (Model 1) returned:', result)
             
-        elif service_type.lower() == 'faceonlive':
+        elif service.lower() == 'aiornot':
+            # Model 2: AI-or-Not API
+            print('[*] Processing with Model 2 (AI-or-Not API)')
+            
+            # Call the AI-or-Not API with the image URL
+            print('[*] Starting AI-or-Not scraper...')
+            result = scrape_aiornot(image_url)
+            print('[DEBUG] AI-or-Not scraper (Model 2) returned:', result)
+            
+        elif service.lower() == 'faceonlive':
             # For FaceOnLive, we pass the local file path directly
             print('[*] Processing with FaceOnLive service')
             
@@ -1162,7 +669,7 @@ def api_ai_detection():
             print('[DEBUG] FaceOnLive scraper returned:', result)
             
         else:
-            print(f'[!] Unknown service type: {service_type}')
+            print(f'[!] Unknown service: {service}')
             return jsonify({
                 'error': 'نوع خدمة غير معروف',
                 'success': False
@@ -1175,7 +682,7 @@ def api_ai_detection():
                 'success': False
             }), 500
             
-        print(f'[✓] Successfully obtained results from {service_type}')
+        print(f'[✓] Successfully obtained results from {service}')
         return jsonify(result)
         
     except Exception as e:
@@ -1422,7 +929,7 @@ def ai_detection_page():
 def upload_to_imgbb(image_data):
     """Upload an image to ImgBB and return the URL"""
     # Use the API key that works in the standalone example
-    imgbb_api_key = os.environ.get('IMGBB_API_KEY', '8a0183d939bb1db66e0e505b80c758e6')
+    imgbb_api_key = os.environ.get('IMGBB_API_KEY', '0a85906528efe824b2563d2ae563b68f')
     
     print(f'[*] Starting ImgBB upload with API key: {imgbb_api_key[:4]}...{imgbb_api_key[-4:]}')
     
@@ -1510,13 +1017,13 @@ def upload_to_imgbb(image_data):
         print(f"[!] Error uploading to ImgBB: {str(e)}")
         return None
 
-def scrape_thehive(image_url):
-    """Detect AI-generated images using TheHive.ai API"""
-    print(f'[*] Starting AI detection for image: {image_url}')
+def scrape_aiornot(image_url):
+    """Detect AI-generated images using AI-or-Not API (Model 2)"""
+    print(f'[*] Starting AI-or-Not detection (Model 2) for image: {image_url}')
     
     # Download the image to a temporary file
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    temp_image_path = os.path.join(UPLOAD_FOLDER, f"thehive_{uuid.uuid4().hex}.jpg")
+    temp_image_path = os.path.join(UPLOAD_FOLDER, f"aiornot_{uuid.uuid4().hex}.jpg")
     
     print(f'[*] Downloading image to {temp_image_path}')
     download_success = download_image(image_url, temp_image_path)
@@ -1532,7 +1039,185 @@ def scrape_thehive(image_url):
     print(f'[*] Image downloaded successfully to {temp_image_path}')
     
     try:
-        # Use Sightengine API instead of Playwright
+        print('[*] Calling AI-or-Not API...')
+        
+        # Get API key from environment variable or use default (for development only)
+        api_key = os.environ.get('AIORNOT_API_KEY', "f04be06d-cd8f-41bd-8de3-cf7e27d04099")
+        
+        if not api_key:
+            print("[!] No AI-or-Not API key found. Set the AIORNOT_API_KEY environment variable.")
+            return {
+                'error': 'مفتاح API غير موجود. يرجى تعيين مفتاح API في إعدادات البيئة.',
+                'rawText': 'API key not found or invalid',
+                'source': 'Model-2',
+                'success': False,
+                'imageUrl': image_url
+            }
+        
+        # Prepare API request
+        headers = {
+            "X-Api-Key": api_key,
+        }
+        
+        # Send image file in the request
+        with open(temp_image_path, "rb") as img_file:
+            files = {
+                "image": ("image.jpg", img_file, "image/jpeg")
+            }
+            
+            response = requests.post(
+                "https://api.aiornot.com/v1/reports/image",
+                headers=headers,
+                files=files,
+                timeout=30
+            )
+        
+        # Raise an exception if the status code isn't 200
+        response.raise_for_status()
+        
+        # Parse the JSON response
+        report = response.json()
+        print(f'[*] AI-or-Not raw response: {json.dumps(report)[:200]}...')
+        
+        # Check if the response contains an error message
+        if 'error' in report:
+            error_message = report.get('error', 'Unknown error')
+            print(f'[!] API returned error: {error_message}')
+            return {
+                'error': f'\u062e\u0637\u0623 \u0645\u0646 API: {error_message}',
+                'rawText': json.dumps(report, indent=2),
+                'source': 'AI-or-Not',
+                'success': False,
+                'imageUrl': image_url,
+                'verdict': 'Error',
+                'confidence': 0.0
+            }
+            
+        # Extract generator information with safe navigation
+        generator = "unknown"
+        generators = report.get("generators", {})
+        if generators and isinstance(generators, dict):
+            for gen_key, gen_data in generators.items():
+                if gen_data and isinstance(gen_data, dict) and gen_data.get("is_detected", False):
+                    generator = gen_key
+                    break
+        
+        # Get verdict directly from API response
+        verdict = report.get("report", {}).get("verdict", "")
+        is_ai_generated = verdict == "ai"
+        
+        # Get AI and human confidence values directly from the response and ensure they're floats
+        ai_confidence = float(report.get("report", {}).get("ai", {}).get("confidence", 0.0))
+        human_confidence = float(report.get("report", {}).get("human", {}).get("confidence", 0.0))
+        
+        # Ensure confidence values are between 0 and 1 for frontend display
+        ai_confidence = max(0.0, min(ai_confidence, 1.0))
+        human_confidence = max(0.0, min(human_confidence, 1.0))
+        
+        # Set Arabic verdict text based on verdict value
+        verdict_text = "منشأة بواسطة الذكاء الاصطناعي" if verdict == "ai" else "الصورة حقيقية (غير منشأة بالذكاء الاصطناعي)"
+        
+        # Safely extract facets
+        facets = report.get("facets", {})
+        quality_ok = False
+        nsfw = False
+        
+        if facets and isinstance(facets, dict):
+            quality = facets.get("quality", {})
+            if quality and isinstance(quality, dict):
+                quality_ok = quality.get("is_detected", False)
+                
+            nsfw_data = facets.get("nsfw", {})
+            if nsfw_data and isinstance(nsfw_data, dict):
+                nsfw = nsfw_data.get("is_detected", False)
+        
+        # Format the result as specified
+        result = {
+            "verdict": verdict_text,
+            "confidence_ai": ai_confidence,
+            "confidence_human": human_confidence,
+            "generator": generator,
+            "quality_ok": quality_ok,
+            "nsfw": nsfw,
+            # Additional fields to maintain compatibility with the rest of the app
+            'source': 'Model-2',
+            'rawText': json.dumps(report, indent=2),
+            'imageUrl': image_url,
+            'is_ai': is_ai_generated,
+            'success': True
+        }
+        
+        # Debug print to confirm final verdict and confidences
+        print(f'[✓] AI-or-Not analysis complete: Verdict="{verdict_text}", AI confidence={ai_confidence:.2%}, Human confidence={human_confidence:.2%}')
+        return result
+            
+    except requests.exceptions.HTTPError as e:
+        print(f'[!] HTTP Error in AI-or-Not API call: {str(e)}')
+        
+        # Check if this is a 403 Forbidden error (authentication/authorization issue)
+        if e.response.status_code == 403:
+            error_msg = '\u062e\u0637\u0623 \u0641\u064a \u0645\u0641\u062a\u0627\u062d API: \u0625\u0645\u0627 \u0627\u0646\u062a\u0647\u062a \u0635\u0644\u0627\u062d\u064a\u062a\u0647 \u0623\u0648 \u062a\u062c\u0627\u0648\u0632\u062a \u0627\u0644\u062d\u062f \u0627\u0644\u0645\u0633\u0645\u0648\u062d'
+            solution_msg = '\u064a\u0631\u062c\u0649 \u062a\u062d\u062f\u064a\u062b \u0645\u0641\u062a\u0627\u062d API \u0623\u0648 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u0631\u0635\u064a\u062f \u062d\u0633\u0627\u0628\u0643'
+            print(f"[!] API authentication error: API key expired, invalid, or quota exceeded")
+            return {
+                'error': f"{error_msg}. {solution_msg}",
+                'rawText': f"Authentication error (403 Forbidden): API key may be invalid, expired, or quota exceeded.",
+                'source': 'Model-2',
+                'success': False,
+                'imageUrl': image_url
+            }
+        else:
+            return {
+                'error': f'\u062e\u0637\u0623 \u0641\u064a \u0627\u0644\u0627\u062a\u0635\u0627\u0644 \u0628\u0627\u0644\u062e\u0627\u062f\u0645: {e.response.status_code}',
+                'rawText': f'HTTP Error: {str(e)}',
+                'source': 'Model-2',
+                'success': False,
+                'imageUrl': image_url
+            }
+    
+    except Exception as e:
+        print(f'[!] Error in AI-or-Not API call: {str(e)}')
+        traceback.print_exc()
+        return {
+            'error': f'\u062e\u0637\u0623 \u0623\u062b\u0646\u0627\u0621 \u0627\u0644\u062a\u062d\u0644\u064a\u0644: {str(e)}',
+            'rawText': f'\u062e\u0637\u0623 \u0623\u062b\u0646\u0627\u0621 \u0627\u0644\u062a\u062d\u0644\u064a\u0644: {str(e)}',
+            'source': 'Model-2',
+            'success': False,
+            'imageUrl': image_url
+        }
+    finally:
+        # Clean up temp file
+        try:
+            if os.path.exists(temp_image_path):
+                os.remove(temp_image_path)
+                print(f'[*] Removed temporary file: {temp_image_path}')
+        except Exception as e:
+            print(f'[!] Error removing temp file: {str(e)}')
+        print('[*] AI-or-Not detection (Model 2) completed')
+
+def scrape_thehive(image_url):
+    """Detect AI-generated images using Sightengine API (Model 1)"""
+    print(f'[*] Starting Sightengine detection (Model 1) for image: {image_url}')
+    
+    # Download the image to a temporary file
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    temp_image_path = os.path.join(UPLOAD_FOLDER, f"sightengine_{uuid.uuid4().hex}.jpg")
+    
+    print(f'[*] Downloading image to {temp_image_path}')
+    download_success = download_image(image_url, temp_image_path)
+    
+    if not download_success or not os.path.exists(temp_image_path):
+        return {
+            'rawText': f'\u062e\u0637\u0623: \u0641\u0634\u0644 \u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0635\u0648\u0631\u0629 \u0645\u0646 \u0627\u0644\u0631\u0627\u0628\u0637 \u0627\u0644\u0645\u062d\u062f\u062f',
+            'source': 'Error',
+            'error': 'Failed to download image',
+            'imageUrl': image_url
+        }
+    
+    print(f'[*] Image downloaded successfully to {temp_image_path}')
+    
+    try:
+        # Use Sightengine API
         print('[*] Calling Sightengine API...')
         import requests
 
@@ -1551,19 +1236,38 @@ def scrape_thehive(image_url):
         if resp.status_code != 200 or result.get("status") != "success":
             return {
               'rawText': f"Error {resp.status_code}: {result}",
-              'source': 'Sightengine',
+              'source': 'Model-1',
               'error': result,
               'imageUrl': image_url
             }
 
         score = result['type']['ai_generated']
+        
+        # For consistency with the other model, calculate human score as inverse of AI score
+        ai_confidence = float(score)
+        human_confidence = 1.0 - ai_confidence
+        
+        # Ensure confidence values are between 0 and 1
+        ai_confidence = max(0.0, min(ai_confidence, 1.0))
+        human_confidence = max(0.0, min(human_confidence, 1.0))
+        
+        # Set verdict text based on AI score
+        is_ai = ai_confidence > 0.5
+        verdict_text = "منشأة بواسطة الذكاء الاصطناعي" if is_ai else "الصورة حقيقية (غير منشأة بالذكاء الاصطناعي)"
+        
+        # Format result to match the other function's structure for frontend compatibility
         return {
-          'rawText': f"AI-generated confidence: {score:.2%}",
-          'source': 'Sightengine',
-          'confidence': score,
-          'is_ai': score > 0.5,
-          'imageUrl': image_url,
-          'success': True
+            "verdict": verdict_text,
+            "confidence_ai": ai_confidence,
+            "confidence_human": human_confidence,
+            "generator": "unknown",  # Sightengine doesn't provide generator info
+            "quality_ok": True,     # No quality info, assume OK
+            "nsfw": False,          # No NSFW info
+            'source': 'Model-1',
+            'rawText': json.dumps(result, indent=2),
+            'imageUrl': image_url,
+            'is_ai': is_ai,
+            'success': True
         }
             
     except Exception as e:
@@ -1572,7 +1276,7 @@ def scrape_thehive(image_url):
         return {
             'error': f'\u062e\u0637\u0623 \u0623\u062b\u0646\u0627\u0621 \u0627\u0644\u062a\u062d\u0644\u064a\u0644: {str(e)}',
             'rawText': f'\u062e\u0637\u0623 \u0623\u062b\u0646\u0627\u0621 \u0627\u0644\u062a\u062d\u0644\u064a\u0644: {str(e)}',
-            'source': 'Sightengine',
+            'source': 'Model-1',
             'success': False,
             'imageUrl': image_url
         }
@@ -1584,11 +1288,11 @@ def scrape_thehive(image_url):
                 print(f'[*] Removed temporary file: {temp_image_path}')
         except Exception as e:
             print(f'[!] Error removing temp file: {str(e)}')
-        print('[*] Sightengine detection completed')
+        print('[*] Sightengine detection (Model 1) completed')
 
 # FaceOnLive implementation using the new scraper code
 def scrape_faceonlive(image_path):
-    """Automated scraper for FaceOnLive deepfake detection"""
+    """Detect if an image is AI-generated using FaceOnLive's API"""
     print(f"[*] Starting FaceOnLive scraper with image: {image_path}")
     try:
         with sync_playwright() as playwright:

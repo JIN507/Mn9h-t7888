@@ -103,27 +103,27 @@
                 <!-- Detection Service Selection Tabs -->
                 <ul class="nav nav-tabs mb-4" id="detectionServiceTabs" role="tablist">
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link active" id="thehive-tab" data-bs-toggle="tab" 
-                                data-bs-target="#thehive" type="button" role="tab" 
-                                aria-controls="thehive" aria-selected="true"
+                        <button class="nav-link active" id="model1-tab" data-bs-toggle="tab" 
+                                data-bs-target="#model1" type="button" role="tab" 
+                                aria-controls="model1" aria-selected="true"
                                 style="color: #2563eb; border-bottom-color: #2563eb;">
-                            TheHive.ai
+                            التحقق باستخدام النموذج 1
                         </button>
                     </li>
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="faceonlive-tab" data-bs-toggle="tab" 
-                                data-bs-target="#faceonlive" type="button" role="tab" 
-                                aria-controls="faceonlive" aria-selected="false"
+                        <button class="nav-link" id="model2-tab" data-bs-toggle="tab" 
+                                data-bs-target="#model2" type="button" role="tab" 
+                                aria-controls="model2" aria-selected="false"
                                 style="color: #6c757d; transition: color 0.3s ease;">
-                            FaceOnLive
+                            التحقق باستخدام النموذج 2
                         </button>
                     </li>
                 </ul>
 
                 <!-- Form for image upload -->
                 <form id="ai-detection-form" class="mb-4" enctype="multipart/form-data">
-                    <div class="card mb-4 border-primary">
-                        <div class="card-header bg-primary bg-opacity-10 text-primary fw-bold">
+                    <div class="card mb-4" style="border-color: #2563eb">
+                        <div class="card-header fw-bold" style="background-color: rgba(37, 99, 235, 0.15); color: #2563eb">
                             <i class="bi bi-image me-2"></i>اختيار الصورة
                         </div>
                         <div class="card-body">
@@ -251,21 +251,21 @@
         const analysisTime = document.getElementById('analysis-time');
         
         // Service tabs
-        const thehiveTab = document.getElementById('thehive-tab');
-        const faceonliveTab = document.getElementById('faceonlive-tab');
+        const model1Tab = document.getElementById('model1-tab');
+        const model2Tab = document.getElementById('model2-tab');
         
         // Current selected service
-        let currentService = 'thehive'; // Default service
+        let currentService = 'thehive'; // Default service is still 'thehive' in backend
         
         // Add event listeners for tab switching
-        thehiveTab.addEventListener('click', function() {
+        model1Tab.addEventListener('click', function() {
             currentService = 'thehive';
-            console.log('Service switched to TheHive.ai');
+            console.log('Service switched to Model 1 (Sightengine)');
         });
         
-        faceonliveTab.addEventListener('click', function() {
-            currentService = 'faceonlive';
-            console.log('Service switched to FaceOnLive');
+        model2Tab.addEventListener('click', function() {
+            currentService = 'aiornot';
+            console.log('Service switched to Model 2 (AI-or-Not)');
         });
 
         // Format file size to human-readable format
@@ -437,8 +437,8 @@
             // Make AJAX request
             const xhr = new XMLHttpRequest();
             
-            // Choose the correct API endpoint based on selected service
-            const endpoint = currentService === 'thehive' ? '/api/ai-detection' : '/api/faceonlive-detection';
+            // All services now use the same AI detection endpoint
+            const endpoint = '/api/ai-detection';
             xhr.open('POST', endpoint, true);
             
             xhr.onload = function() {
@@ -467,9 +467,9 @@
                         
                         // Handle results based on service
                         if (currentService === 'thehive') {
-                            displayTheHiveResults(response);
+                            displayModel1Results(response); // Model 1 (Sightengine)
                         } else {
-                            displayFaceOnLiveResults(response);
+                            displayModel2Results(response); // Model 2 (AI-or-Not)
                         }
                     } catch (error) {
                         console.error('Error parsing results:', error);
@@ -491,34 +491,68 @@
             xhr.send(formData);
         });
         
-        // Display TheHive.ai results (now using Sightengine API)
-        function displayTheHiveResults(response) {
-            console.log('Processing TheHive.ai/Sightengine results:', response);
+        // Display Model 1 results (using Sightengine API)
+        function displayModel1Results(response) {
+            console.log('Processing Model 1 (Sightengine) results:', response);
             
-            // Handle Sightengine API response format
+            // First try to extract confidence scores from confidence_ai and confidence_human fields (new format)
+            let aiScore = 0;
+            let humanScore = 0;
             let isAi = false;
-            let confidence = 0;
             
-            // First check if we have direct is_ai flag from Sightengine
-            if (response.is_ai !== undefined) {
-                isAi = response.is_ai;
-                confidence = response.confidence !== undefined ? parseFloat(response.confidence) : 0;
+            if (response.confidence_ai !== undefined && response.confidence_human !== undefined) {
+                // Extract scores from new API format
+                console.log('Using confidence_ai/confidence_human format');
+                
+                // Convert confidence scores to numbers
+                aiScore = typeof response.confidence_ai === 'number' ? response.confidence_ai :
+                         (typeof response.confidence_ai === 'string' ? parseFloat(response.confidence_ai) : 0);
+                         
+                humanScore = typeof response.confidence_human === 'number' ? response.confidence_human :
+                           (typeof response.confidence_human === 'string' ? parseFloat(response.confidence_human) : 0);
+                
+                // Ensure valid numbers
+                aiScore = isNaN(aiScore) ? 0 : aiScore;
+                humanScore = isNaN(humanScore) ? 0 : humanScore;
+                
+                // Determine if AI based on which score is higher
+                isAi = aiScore > humanScore;
             } else {
                 // Fall back to original logic for backward compatibility
+                console.log('Using legacy format for confidence scores');
+                
+                // Handle Sightengine API response format
                 const aiGeneratedScore = response.ai_generated_score !== undefined ? parseFloat(response.ai_generated_score) : 0;
                 const notAiGeneratedScore = response.not_ai_generated_score !== undefined ? parseFloat(response.not_ai_generated_score) : 0;
+                
+                // Get verdict from response or determine based on scores
                 const verdict = response.verdict || (aiGeneratedScore > notAiGeneratedScore ? 'ai' : 'not_ai');
-                isAi = verdict === 'ai';
-                confidence = response.confidence !== undefined ? parseFloat(response.confidence) : Math.max(aiGeneratedScore, notAiGeneratedScore);
+                isAi = verdict === 'ai' || verdict.includes('منشأة بواسطة الذكاء الاصطناعي');
+                
+                // Set scores based on the verdict
+                if (isAi) {
+                    aiScore = aiGeneratedScore || response.confidence || 0.9; // Default to 0.9 if no score provided
+                    humanScore = 1 - aiScore;
+                } else {
+                    humanScore = notAiGeneratedScore || response.confidence || 0.9; // Default to 0.9 if no score provided
+                    aiScore = 1 - humanScore;
+                }
             }
             
-            // Calculate percentages based on confidence
-            const aiScorePercent = isAi ? (confidence * 100).toFixed(2) + '%' : '0.00%';
-            const notAiScorePercent = !isAi ? (confidence * 100).toFixed(2) + '%' : '0.00%';
+            // Debug log the extracted scores
+            console.log('Final AI score:', aiScore, 'Human score:', humanScore, 'Is AI:', isAi);
             
-            // Set verdict and colors based on confidence threshold (>50%)
+            // Format scores as percentages for display
+            const aiScorePercent = (aiScore * 100).toFixed(2) + '%';
+            const humanScorePercent = (humanScore * 100).toFixed(2) + '%';
+            
+            // Also create percentage values for CSS width
+            const aiScoreWidth = aiScore > 0 ? (aiScore * 100).toFixed(2) + '%' : '0%';
+            const humanScoreWidth = humanScore > 0 ? (humanScore * 100).toFixed(2) + '%' : '0%';
+            
+            // Set verdict and colors based on which score is higher
             let verdictText, alertClass;
-            if (isAi || confidence > 0.5) {
+            if (isAi || aiScore > 0.5) {
                 verdictText = 'الصورة منتجة باستخدام الذكاء الاصطناعي';
                 alertClass = 'alert alert-warning';
             } else {
@@ -540,16 +574,16 @@
                             <strong>${aiScorePercent}</strong>
                         </div>
                         <div class="progress">
-                            <div class="progress-bar bg-warning confidence-bar" style="width: ${aiScorePercent}"></div>
+                            <div class="progress-bar bg-warning confidence-bar" style="width: ${aiScoreWidth}"></div>
                         </div>
                     </div>
                     <div class="mb-3">
                         <div class="d-flex justify-content-between mb-1">
                             <span>صورة حقيقية</span>
-                            <strong>${notAiScorePercent}</strong>
+                            <strong>${humanScorePercent}</strong>
                         </div>
                         <div class="progress">
-                            <div class="progress-bar bg-success confidence-bar" style="width: ${notAiScorePercent}"></div>
+                            <div class="progress-bar bg-success confidence-bar" style="width: ${humanScoreWidth}"></div>
                         </div>
                     </div>
                 </div>
@@ -632,75 +666,127 @@
             resultDetails.innerHTML = detailsHtml;
         }
         
-        // Display FaceOnLive results
-        function displayFaceOnLiveResults(response) {
-            console.log('Processing FaceOnLive results:', response);
+        // Display Model 2 results (using AI-or-Not API)
+        function displayModel2Results(response) {
+            console.log('Processing Model 2 (AI-or-Not) results:', response);
             
-            // Extract data from response
-            const aiScore = response.ai_score !== undefined ? parseFloat(response.ai_score) : 0;
-            const realScore = response.real_score !== undefined ? parseFloat(response.real_score) : 0;
+            // Extract data directly from response - use the verdict text directly from API
+            const verdictText = response.verdict || '';
+            const isAI = verdictText.includes('منشأة بواسطة الذكاء الاصطناعي');
             
-            // Parse raw results to find "No Deepfake" percentage
-            let noDeepfakePercentage = 0;
-            if (response.rawText) {
-                const noDeepfakeMatch = response.rawText.match(/No Deepfake:\s*(\d+)%/i);
-                if (noDeepfakeMatch && noDeepfakeMatch[1]) {
-                    noDeepfakePercentage = parseInt(noDeepfakeMatch[1]);
-                    console.log('Found No Deepfake percentage:', noDeepfakePercentage);
-                }
-            }
+            // Get confidence scores directly from the response and ensure they are numbers
+            // Explicitly handle various response formats (string, number, null, undefined)
+            let aiScoreRaw = response.confidence_ai;
+            let humanScoreRaw = response.confidence_human;
             
-            // Format scores as percentages
+            // Convert to number, handling edge cases
+            let aiScore = typeof aiScoreRaw === 'number' ? aiScoreRaw : 
+                         (typeof aiScoreRaw === 'string' ? parseFloat(aiScoreRaw) : 0);
+            let humanScore = typeof humanScoreRaw === 'number' ? humanScoreRaw : 
+                           (typeof humanScoreRaw === 'string' ? parseFloat(humanScoreRaw) : 0);
+            
+            // Ensure values are valid numbers
+            aiScore = isNaN(aiScore) ? 0 : aiScore;
+            humanScore = isNaN(humanScore) ? 0 : humanScore;
+            
+            // Log values for debugging
+            console.log('AI Score raw:', aiScoreRaw, 'type:', typeof aiScoreRaw, 'parsed:', aiScore);
+            console.log('Human Score raw:', humanScoreRaw, 'type:', typeof humanScoreRaw, 'parsed:', humanScore);
+            
+            // Format scores as percentages for display
             const aiScorePercent = (aiScore * 100).toFixed(2) + '%';
-            const realScorePercent = (realScore * 100).toFixed(2) + '%';
-            const noDeepfakeScorePercent = noDeepfakePercentage + '%';
+            const humanScorePercent = (humanScore * 100).toFixed(2) + '%';
             
-            // Set verdict and colors based on No Deepfake percentage
-            let verdictText, alertClass;
-            // If "No Deepfake" is > 50%, show as real image (as requested)
-            if (noDeepfakePercentage > 50) {
-                verdictText = 'الصورة حقيقية (غير منشأة بالذكاء الاصطناعي)';
-                alertClass = 'alert alert-success';
-            } else {
-                verdictText = 'الصورة منشاة باستخدام الذكاء الاصطناعي';
-                alertClass = 'alert alert-warning';
-            }
+            // Also create percentage values for CSS width (ensure they are strings with % sign)
+            const aiScoreWidth = aiScore > 0 ? (aiScore * 100).toFixed(2) + '%' : '0%';
+            const humanScoreWidth = humanScore > 0 ? (humanScore * 100).toFixed(2) + '%' : '0%';
+            
+            // Set alert class based on verdict
+            const alertClass = isAI ? 'alert alert-warning' : 'alert alert-success';
             
             // Update UI
             resultAlert.className = alertClass;
             resultVerdict.textContent = verdictText;
             
-            // Create confidence bars
-            const detailsHtml = `
+            // Create base details HTML with confidence bars - using correct width values
+            let detailsHtml = `
                 <div class="mb-4">
                     <h5 class="mb-3">تحليل الصورة:</h5>
                     <div class="mb-3">
                         <div class="d-flex justify-content-between mb-1">
-                            <span>مزيفة / ذكاء اصطناعي</span>
+                            <span>منشأة بواسطة الذكاء الاصطناعي</span>
                             <strong>${aiScorePercent}</strong>
                         </div>
                         <div class="progress">
-                            <div class="progress-bar bg-warning confidence-bar" style="width: ${aiScorePercent}"></div>
+                            <div class="progress-bar bg-warning confidence-bar" style="width: ${aiScoreWidth}"></div>
                         </div>
                     </div>
                     <div class="mb-3">
                         <div class="d-flex justify-content-between mb-1">
                             <span>صورة حقيقية</span>
-                            <strong>${realScorePercent}</strong>
+                            <strong>${humanScorePercent}</strong>
                         </div>
                         <div class="progress">
-                            <div class="progress-bar bg-success confidence-bar" style="width: ${realScorePercent}"></div>
+                            <div class="progress-bar bg-success confidence-bar" style="width: ${humanScoreWidth}"></div>
                         </div>
                     </div>
-                    <div class="mb-3">
-                        <div class="d-flex justify-content-between mb-1">
-                            <span>No Deepfake</span>
-                            <strong>${noDeepfakeScorePercent}</strong>
-                        </div>
-                        <div class="progress">
-                            <div class="progress-bar bg-primary confidence-bar" style="width: ${noDeepfakeScorePercent}"></div>
+                </div>
+            `;
+            
+            // Add generator information if available
+            if (response.generator && response.generator !== "unknown") {
+                detailsHtml += `
+                    <div class="mb-4">
+                        <h5 class="mb-3">مولدات الذكاء الاصطناعي المكتشفة:</h5>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered">
+                                <thead>
+                                    <tr>
+                                        <th>المولد</th>
+                                        <th>الثقة</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>${response.generator.replace(/_/g, ' ')}</td>
+                                        <td>${(response.confidence_ai * 100).toFixed(2)}%</td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
+                `;
+            }
+            
+            // Add quality and NSFW badges if available
+            let badgesHtml = '';
+            if (response.quality_ok !== undefined) {
+                const qualityClass = response.quality_ok ? 'success' : 'secondary';
+                const qualityText = response.quality_ok ? 'جودة عالية' : 'جودة منخفضة';
+                badgesHtml += `<span class="badge bg-${qualityClass} me-2">${qualityText}</span>`;
+            }
+            
+            if (response.nsfw) {
+                badgesHtml += `<span class="badge bg-danger">NSFW</span>`;
+            }
+            
+            if (badgesHtml) {
+                detailsHtml += `
+                    <div class="mb-4">
+                        <h5 class="mb-3">معلومات إضافية:</h5>
+                        <div>${badgesHtml}</div>
+                    </div>
+                `;
+            }
+            
+            // Add raw JSON debug option
+            detailsHtml += `
+                <div class="mt-4 pt-3 border-top">
+                    <button class="btn btn-sm btn-outline-secondary" type="button" 
+                            onclick="document.getElementById('rawJsonResponse').classList.toggle('d-none')">
+                        عرض/إخفاء البيانات الخام
+                    </button>
+                    <pre id="rawJsonResponse" class="mt-2 p-2 bg-light d-none" style="direction: ltr; text-align: left; font-size: 0.8rem;">${JSON.stringify(response, null, 2)}</pre>
                 </div>
             `;
             
