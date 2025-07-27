@@ -164,113 +164,6 @@ USER_DATA_DIR = os.path.join(BASE_DIR, "user-data")
 
 
 
-def scrape_faceonlive(image_path):
-    """Detect deepfake using faceonlive.com API"""
-    print(f'[*] Starting deepfake detection for image: {image_path}')
-    
-    if not os.path.exists(image_path):
-        return {
-            'rawText': f'خطأ: ملف الصورة غير موجود',
-            'source': 'Error',
-            'error': 'Image file not found',
-            'imageUrl': None
-        }
-        
-    with sync_playwright() as playwright:
-        try:
-            # Launch browser with headless=False to see what's happening
-            print('[*] Launching browser for FaceOnLive scraping...')
-            browser = playwright.chromium.launch(headless=False)
-            context = browser.new_context(viewport={'width': 1280, 'height': 800})
-            page = context.new_page()
-
-            print("[*] Opening website...")
-            page.goto("https://faceonlive.com/projects/deepfake-detection-sdk/")
-            page.wait_for_load_state("networkidle")
-
-            print("[*] Getting iframe...")
-            frame_element = page.query_selector("iframe")
-            frame = frame_element.content_frame()
-
-            print("[*] Uploading image...")
-            file_input = frame.locator('input[type="file"]')
-            file_input.set_input_files(image_path)
-
-            print("[*] Giving Gradio some time to attach event handlers...")
-            time.sleep(2)
-
-            print("[*] Clicking Detect button...")
-            frame.locator('button#component-9').click()
-
-            print("[*] Waiting for result...")
-            frame.wait_for_selector('h2[data-testid="label-output-value"]', timeout=120000)
-
-            # Collect results
-            results = []
-            print("\n[MAIN RESULTS]:")
-            headers = frame.locator('h2[data-testid="label-output-value"]')
-            for i in range(headers.count()):
-                text = headers.nth(i).inner_text()
-                print(f"- {text}")
-                results.append(f"- {text}")
-
-            confidence_scores = []
-            print("\n[DETAILED CONFIDENCE SCORES]:")
-            buttons = frame.locator('button.confidence-set')
-            for i in range(buttons.count()):
-                model = buttons.nth(i).locator('dt').inner_text()
-                confidence = buttons.nth(i).locator('dd').inner_text()
-                print(f"{model}: {confidence}")
-                confidence_scores.append(f"{model}: {confidence}")
-                
-            # Format the results
-            main_result = "\n".join(results)
-            detailed_scores = "\n".join(confidence_scores)
-            full_result = f"[MAIN RESULTS]:\n{main_result}\n\n[DETAILED CONFIDENCE SCORES]:\n{detailed_scores}"
-            
-            # Take screenshot for result visualization
-            result_screenshot = os.path.join(UPLOAD_FOLDER, "faceonlive_result.png")
-            page.screenshot(path=result_screenshot)
-            
-            # Get the first result as the primary classification
-            primary_result = "Unknown"
-            if len(results) > 0:
-                primary_result = results[0].replace('- ', '')
-                
-            # Upload the image to ImgBB for later reference
-            image_url = None
-            try:
-                with open(image_path, 'rb') as f:
-                    image_data = base64.b64encode(f.read()).decode('utf-8')
-                image_url = upload_to_imgbb(image_data)
-            except Exception as img_err:
-                print(f"[!] Error uploading result image: {str(img_err)}")
-                
-            return {
-                'rawText': full_result,
-                'source': 'FaceOnLive',
-                'result': primary_result,
-                'imageUrl': image_url,
-                'confidence_scores': confidence_scores
-            }
-            
-        except Exception as e:
-            print(f'[!] Error during deepfake detection: {str(e)}')
-            traceback.print_exc()
-            return {
-                'rawText': f'خطأ أثناء تحليل الصورة: {str(e)}',
-                'source': 'Error',
-                'error': str(e),
-                'imageUrl': None
-            }
-        finally:
-            # إضافة تأخير قبل إغلاق المتصفح للسماح برؤية النتائج
-            print('[*] Keeping browser open for 5 seconds to view results...')
-            try:
-                time.sleep(5)  # انتظر 5 ثواني قبل الإغلاق
-            except Exception:
-                pass
-            print('[*] Playwright session finished')
 
 
 def search_images(image_url):
@@ -1017,171 +910,143 @@ def upload_to_imgbb(image_data):
         print(f"[!] Error uploading to ImgBB: {str(e)}")
         return None
 
+def download_image(url, save_path):
+    """Download an image from URL to specified path"""
+    try:
+        response = requests.get(url, stream=True, timeout=15)
+        response.raise_for_status()
+        
+        with open(save_path, 'wb') as img_file:
+            for chunk in response.iter_content(chunk_size=8192):
+                img_file.write(chunk)
+        
+        # Verify file was actually created and contains data
+        if os.path.exists(save_path) and os.path.getsize(save_path) > 0:
+            print(f"[✓] Successfully downloaded image to {save_path}")
+            return True
+        else:
+            print(f"[!] Downloaded file is empty or does not exist: {save_path}")
+            return False
+    except Exception as e:
+        print(f"[!] Error downloading image: {str(e)}")
+        return False
+
 def scrape_aiornot(image_url):
-    """Detect AI-generated images using AI-or-Not API (Model 2)"""
-    print(f'[*] Starting AI-or-Not detection (Model 2) for image: {image_url}')
-    
-    # Download the image to a temporary file
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    temp_image_path = os.path.join(UPLOAD_FOLDER, f"aiornot_{uuid.uuid4().hex}.jpg")
-    
-    print(f'[*] Downloading image to {temp_image_path}')
-    download_success = download_image(image_url, temp_image_path)
-    
-    if not download_success or not os.path.exists(temp_image_path):
-        return {
-            'rawText': f'\u062e\u0637\u0623: \u0641\u0634\u0644 \u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0635\u0648\u0631\u0629 \u0645\u0646 \u0627\u0644\u0631\u0627\u0628\u0637 \u0627\u0644\u0645\u062d\u062f\u062f',
-            'source': 'Error',
-            'error': 'Failed to download image',
-            'imageUrl': image_url
-        }
-    
-    print(f'[*] Image downloaded successfully to {temp_image_path}')
+    """Detect AI-generated images using AI-or-Not API
+    Following the exact structure from AI or Not official documentation
+    """
+    print(f'[*] Starting AI-or-Not detection for image: {image_url}')
     
     try:
-        print('[*] Calling AI-or-Not API...')
+        # Download the image to a temporary file
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        temp_image_path = os.path.join(UPLOAD_FOLDER, f"aiornot_{uuid.uuid4().hex}.jpg")
         
-        # Get API key from environment variable or use default (for development only)
-        api_key = os.environ.get('AIORNOT_API_KEY', "f04be06d-cd8f-41bd-8de3-cf7e27d04099")
+        print(f'[*] Downloading image to {temp_image_path}')
+        download_success = download_image(image_url, temp_image_path)
         
-        if not api_key:
-            print("[!] No AI-or-Not API key found. Set the AIORNOT_API_KEY environment variable.")
+        if not download_success or not os.path.exists(temp_image_path):
             return {
-                'error': 'مفتاح API غير موجود. يرجى تعيين مفتاح API في إعدادات البيئة.',
-                'rawText': 'API key not found or invalid',
-                'source': 'Model-2',
+                'error': 'Failed to download image from specified URL',
                 'success': False,
                 'imageUrl': image_url
             }
         
-        # Prepare API request
-        headers = {
-            "X-Api-Key": api_key,
-        }
+        # Get API key from environment variable exactly as in the example
+        API_KEY = os.environ.get('AIORNOT_API_KEY') or AIORNOT_API_KEY
+        IMAGE_ENDPOINT = "https://api.aiornot.com/v2/image/sync"
         
-        # Send image file in the request
-        with open(temp_image_path, "rb") as img_file:
-            files = {
-                "image": ("image.jpg", img_file, "image/jpeg")
+        # Simple API call exactly as in the official documentation
+        print(f'[*] Calling AI-or-Not API endpoint: {IMAGE_ENDPOINT}')
+        with open(temp_image_path, "rb") as image_file:
+            files = {"image": image_file}
+            params = {
+                "external_id": f"bahith-{uuid.uuid4().hex[:8]}"  # Optional tracking ID
             }
             
-            response = requests.post(
-                "https://api.aiornot.com/v1/reports/image",
-                headers=headers,
+            resp = requests.post(
+                IMAGE_ENDPOINT, 
+                headers={"Authorization": f"Bearer {API_KEY}"},
                 files=files,
-                timeout=30
+                params=params
             )
-        
-        # Raise an exception if the status code isn't 200
-        response.raise_for_status()
-        
-        # Parse the JSON response
-        report = response.json()
-        print(f'[*] AI-or-Not raw response: {json.dumps(report)[:200]}...')
-        
-        # Check if the response contains an error message
-        if 'error' in report:
-            error_message = report.get('error', 'Unknown error')
-            print(f'[!] API returned error: {error_message}')
-            return {
-                'error': f'\u062e\u0637\u0623 \u0645\u0646 API: {error_message}',
-                'rawText': json.dumps(report, indent=2),
-                'source': 'AI-or-Not',
-                'success': False,
-                'imageUrl': image_url,
-                'verdict': 'Error',
-                'confidence': 0.0
-            }
             
-        # Extract generator information with safe navigation
-        generator = "unknown"
-        generators = report.get("generators", {})
-        if generators and isinstance(generators, dict):
-            for gen_key, gen_data in generators.items():
-                if gen_data and isinstance(gen_data, dict) and gen_data.get("is_detected", False):
-                    generator = gen_key
-                    break
+            # Check for HTTP errors and raise them
+            try:
+                resp.raise_for_status()
+            except requests.exceptions.HTTPError as e:
+                error_msg = f"Failed to analyze image: {resp.status_code} {resp.text}"
+                print(f'[!] {error_msg}')
+                return {
+                    'error': error_msg,
+                    'success': False,
+                    'imageUrl': image_url
+                }
         
-        # Get verdict directly from API response
-        verdict = report.get("report", {}).get("verdict", "")
-        is_ai_generated = verdict == "ai"
+        # Parse the response according to v2 API structure
+        result = resp.json()
+        print("[*] API Response received")
+        print(json.dumps(result, indent=2))
         
-        # Get AI and human confidence values directly from the response and ensure they're floats
-        ai_confidence = float(report.get("report", {}).get("ai", {}).get("confidence", 0.0))
-        human_confidence = float(report.get("report", {}).get("human", {}).get("confidence", 0.0))
+        # Extract information from new response structure
+        ai_generated_report = result.get('report', {}).get('ai_generated', {})
         
-        # Ensure confidence values are between 0 and 1 for frontend display
-        ai_confidence = max(0.0, min(ai_confidence, 1.0))
-        human_confidence = max(0.0, min(human_confidence, 1.0))
+        # Check if AI verdict exists
+        if ai_generated_report:
+            verdict = ai_generated_report.get('verdict', '').lower()
+            is_ai_generated = (verdict == 'ai')
+            
+            # Get confidence scores
+            ai_confidence = ai_generated_report.get('ai', {}).get('confidence', 0.0)
+            human_confidence = ai_generated_report.get('human', {}).get('confidence', 0.0)
+            
+            # Get generator information
+            generators_dict = ai_generated_report.get('generator', {})
+            
+            # Find the generator with highest confidence
+            generator = 'unknown'
+            max_confidence = 0
+            for gen_name, confidence in generators_dict.items():
+                # Ensure the confidence value is a number, not a dictionary or other type
+                if isinstance(confidence, (int, float)) and confidence > max_confidence:
+                    max_confidence = confidence
+                    generator = gen_name
+                # If confidence is a dictionary (unexpected format), try to extract a usable value
+                elif isinstance(confidence, dict) and 'confidence' in confidence:
+                    conf_value = confidence.get('confidence', 0)
+                    if conf_value > max_confidence:
+                        max_confidence = conf_value
+                        generator = gen_name
+                    
+            # Set Arabic verdict
+            verdict_arabic = "منشأة بواسطة الذكاء الاصطناعي" if is_ai_generated else "الصورة حقيقية (غير منشأة بالذكاء الاصطناعي)"
+        else:
+            # Fallback to older structure or set defaults if structure is unexpected
+            is_ai_generated = False
+            ai_confidence = 0.0
+            human_confidence = 1.0
+            generator = 'unknown'
+            verdict_arabic = "لا يمكن تحديد مصدر الصورة"
+            print("[!] Warning: Unexpected API response structure")
         
-        # Set Arabic verdict text based on verdict value
-        verdict_text = "منشأة بواسطة الذكاء الاصطناعي" if verdict == "ai" else "الصورة حقيقية (غير منشأة بالذكاء الاصطناعي)"
-        
-        # Safely extract facets
-        facets = report.get("facets", {})
-        quality_ok = False
-        nsfw = False
-        
-        if facets and isinstance(facets, dict):
-            quality = facets.get("quality", {})
-            if quality and isinstance(quality, dict):
-                quality_ok = quality.get("is_detected", False)
-                
-            nsfw_data = facets.get("nsfw", {})
-            if nsfw_data and isinstance(nsfw_data, dict):
-                nsfw = nsfw_data.get("is_detected", False)
-        
-        # Format the result as specified
-        result = {
-            "verdict": verdict_text,
+        # Return the simplified result format
+        return {
+            "verdict": verdict_arabic,
             "confidence_ai": ai_confidence,
             "confidence_human": human_confidence,
             "generator": generator,
-            "quality_ok": quality_ok,
-            "nsfw": nsfw,
-            # Additional fields to maintain compatibility with the rest of the app
-            'source': 'Model-2',
-            'rawText': json.dumps(report, indent=2),
-            'imageUrl': image_url,
-            'is_ai': is_ai_generated,
-            'success': True
+            "rawText": json.dumps(result, indent=2),
+            "imageUrl": image_url,
+            "is_ai": is_ai_generated,
+            "success": True,
+            "source": 'AI-or-Not'
         }
         
-        # Debug print to confirm final verdict and confidences
-        print(f'[✓] AI-or-Not analysis complete: Verdict="{verdict_text}", AI confidence={ai_confidence:.2%}, Human confidence={human_confidence:.2%}')
-        return result
-            
-    except requests.exceptions.HTTPError as e:
-        print(f'[!] HTTP Error in AI-or-Not API call: {str(e)}')
-        
-        # Check if this is a 403 Forbidden error (authentication/authorization issue)
-        if e.response.status_code == 403:
-            error_msg = '\u062e\u0637\u0623 \u0641\u064a \u0645\u0641\u062a\u0627\u062d API: \u0625\u0645\u0627 \u0627\u0646\u062a\u0647\u062a \u0635\u0644\u0627\u062d\u064a\u062a\u0647 \u0623\u0648 \u062a\u062c\u0627\u0648\u0632\u062a \u0627\u0644\u062d\u062f \u0627\u0644\u0645\u0633\u0645\u0648\u062d'
-            solution_msg = '\u064a\u0631\u062c\u0649 \u062a\u062d\u062f\u064a\u062b \u0645\u0641\u062a\u0627\u062d API \u0623\u0648 \u0627\u0644\u062a\u062d\u0642\u0642 \u0645\u0646 \u0631\u0635\u064a\u062f \u062d\u0633\u0627\u0628\u0643'
-            print(f"[!] API authentication error: API key expired, invalid, or quota exceeded")
-            return {
-                'error': f"{error_msg}. {solution_msg}",
-                'rawText': f"Authentication error (403 Forbidden): API key may be invalid, expired, or quota exceeded.",
-                'source': 'Model-2',
-                'success': False,
-                'imageUrl': image_url
-            }
-        else:
-            return {
-                'error': f'\u062e\u0637\u0623 \u0641\u064a \u0627\u0644\u0627\u062a\u0635\u0627\u0644 \u0628\u0627\u0644\u062e\u0627\u062f\u0645: {e.response.status_code}',
-                'rawText': f'HTTP Error: {str(e)}',
-                'source': 'Model-2',
-                'success': False,
-                'imageUrl': image_url
-            }
-    
     except Exception as e:
         print(f'[!] Error in AI-or-Not API call: {str(e)}')
         traceback.print_exc()
         return {
-            'error': f'\u062e\u0637\u0623 \u0623\u062b\u0646\u0627\u0621 \u0627\u0644\u062a\u062d\u0644\u064a\u0644: {str(e)}',
-            'rawText': f'\u062e\u0637\u0623 \u0623\u062b\u0646\u0627\u0621 \u0627\u0644\u062a\u062d\u0644\u064a\u0644: {str(e)}',
-            'source': 'Model-2',
+            'error': f'Error during analysis: {str(e)}',
             'success': False,
             'imageUrl': image_url
         }
