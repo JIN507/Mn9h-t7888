@@ -197,91 +197,47 @@ ZENSERP_API_KEY = "b0f34e80-874b-11f0-97ae-b7e85e6c575f"
 def scrape_reverse_search(image_url, connect_to=8, read_to=50):
     try:
         print(f'[*] Starting reverse image search for: {image_url}')
-
-        # روابط البحث اليدوي (كما هي)
         search_links = search_images(image_url)
 
         zenserp_key = os.getenv('ZENSERP_API_KEY') or ZENSERP_API_KEY
-        print('[-] Using key suffix:', (zenserp_key or '')[-6:])  # تأكد أنه المفتاح الجديد
+        print('[-] Using key suffix:', (zenserp_key or '')[-6:])
         headers = {'apikey': zenserp_key}
-        params  = {'image_url': image_url}
 
         try:
             print(f'[*] Querying ZenSerp API (connect={connect_to}s, read={read_to}s)')
             response = requests.get(
                 'https://app.zenserp.com/api/v2/search',
                 headers=headers,
-                params=params,
-                timeout=(connect_to, read_to)  # <-- رَفَعْنا المهلة
+                params={'image_url': image_url},
+                timeout=(connect_to, read_to)
             )
             print(f'[*] ZenSerp status={response.status_code}, elapsed={getattr(response, "elapsed", None)}')
 
             if response.status_code == 200:
                 data = response.json()
-                organic = data.get('reverse_image_results', {}).get('organic', []) or data.get('organic_results', [])
+                organic = (data.get('reverse_image_results', {}).get('organic', [])
+                           or data.get('organic_results', []))
                 links = [r.get('url') for r in organic if isinstance(r, dict) and r.get('url')]
+                return {'links': links or [], 'search_urls': search_links, 'source': 'ZenSerp API', 'success': True}
 
-                print(f'[*] Found {len(links)} links from ZenSerp')
-                return {
-                    'links': links or [],
-                    'search_urls': search_links,
-                    'source': 'ZenSerp API',
-                    'success': True
-                }
-
-            # شخّص أخطاء المصادقة/الحصّة بسرعة
             body = ''
-            try:
-                body = response.text[:300]
-            except Exception:
-                pass
+            try: body = response.text[:300]
+            except: pass
+            return {'links': [], 'search_urls': search_links, 'source': 'Search Engine Links',
+                    'error': f'ZenSerp HTTP {response.status_code}: {body}', 'success': True}
 
-            if response.status_code in (401, 402, 403):
-                return {
-                    'links': [],
-                    'search_urls': search_links,
-                    'source': 'Search Engine Links',
-                    'error': f'ZenSerp auth/quota error {response.status_code}: {body}',
-                    'success': True
-                }
+        except requests.exceptions.ReadTimeout:
+            # أهم شيء: **لا** نرمي الاستثناء — نرجّع نتيجة بديلة
+            return {'links': [], 'search_urls': search_links,
+                    'source': 'Search Engine Links (Timeout)',
+                    'error': f'ZenSerp ReadTimeout ({read_to}s)', 'success': True}
 
-            return {
-                'links': [],
-                'search_urls': search_links,
-                'source': 'Search Engine Links',
-                'error': f'ZenSerp HTTP {response.status_code}: {body}',
-                'success': True
-            }
-
-        except requests.exceptions.ReadTimeout as e:
-            print(f'[!] ReadTimeout after {read_to}s: {e}')
-            return {
-                'links': [],
-                'search_urls': search_links,
-                'source': 'Search Engine Links (Timeout)',
-                'error': f'ZenSerp ReadTimeout ({read_to}s)',
-                'success': True
-            }
         except requests.RequestException as e:
-            print(f'[!] RequestException: {e}')
-            traceback.print_exc()
-            return {
-                'links': [],
-                'search_urls': search_links,
-                'source': 'Search Engine Links (API Failed)',
-                'error': str(e),
-                'success': True
-            }
+            return {'links': [], 'search_urls': search_links,
+                    'source': 'Search Engine Links (API Failed)', 'error': str(e), 'success': True}
 
     except Exception as e:
-        print(f'[!] Error in image source search: {e}')
-        traceback.print_exc()
-        return {
-            'links': [],
-            'search_urls': {},
-            'error': str(e),
-            'success': False
-        }
+        return {'links': [], 'search_urls': {}, 'error': str(e), 'success': False}
 
 
 def extract_frames(video_file, frame_interval=2):
@@ -425,9 +381,21 @@ def ai_detect_thehive():
 # First implementation of ai_detect_faceonlive has been removed to prevent duplicate endpoint errors
 # The updated implementation is at line ~1458
 
-@app.route('/image-source-search')
+@app.route('/image-source-search', methods=['GET', 'POST'])
 def image_source_search():
-    return render_template('image_source_search.html')
+    if request.method == 'GET':
+        return render_template('image_source_search.html')
+    # POST:
+    try:
+        data = request.get_json(silent=True) or {}
+        image_url = data.get('image_url') or request.form.get('image_url')
+        if not image_url:
+            return jsonify({'links': [], 'search_urls': {}, 'error': 'image_url is required', 'success': False}), 200
+        result = scrape_reverse_search(image_url)
+        return jsonify(result), 200
+    except Exception as e:
+        current_app.logger.exception(e)
+        return jsonify({'links': [], 'search_urls': {}, 'error': f'Unhandled: {e}', 'success': False}), 200
 
 @app.route('/api/upload', methods=['POST'])
 def upload_image():
@@ -1199,210 +1167,7 @@ def scrape_thehive(image_url):
         print('[*] Sightengine detection (Model 1) completed')
 
 # FaceOnLive implementation using the new scraper code
-def scrape_faceonlive(image_path):
-    """Detect if an image is AI-generated using FaceOnLive's API"""
-    print(f"[*] Starting FaceOnLive scraper with image: {image_path}")
-    try:
-        with sync_playwright() as playwright:
-            # Use more forceful browser launch options
-            print('[*] Launching browser with visible UI...')
-            browser = playwright.chromium.launch(
-                headless=False,  # Ensure we're not in headless mode
-                args=['--start-maximized', '--disable-extensions', '--no-sandbox']
-            )
-            context = browser.new_context(viewport={'width': 1280, 'height': 800})
-            print('[DEBUG] Browser launched successfully!')
-            page = context.new_page()
 
-            print("[*] Opening FaceOnLive website...")
-            page.goto("https://faceonlive.com/projects/deepfake-detection-sdk/")
-            page.wait_for_load_state("networkidle")
-            page.wait_for_timeout(2000)  # Extra wait to ensure the page is fully loaded
-
-            print("[*] Getting iframe...")
-            frame_element = page.query_selector("iframe")
-            if not frame_element:
-                print("[!] Failed to find iframe")
-                return {
-                    'error': 'لم يتم العثور على الإطار في موقع FaceOnLive',
-                    'success': False
-                }
-            
-            frame = frame_element.content_frame()
-
-            print("[*] Uploading image...")
-            file_input = frame.locator('input[type="file"]')
-            file_input.set_input_files(image_path)
-
-            print("[*] Giving Gradio some time to attach event handlers...")
-            time.sleep(2)
-
-            print("[*] Clicking Detect button...")
-            detect_button = frame.locator('button#component-9')
-            if not detect_button.count():
-                print("[!] Failed to find detect button")
-                return {
-                    'error': 'لم يتم العثور على زر الكشف',
-                    'success': False
-                }
-            detect_button.click()
-
-            print("[*] Waiting for result...")
-            frame.wait_for_selector('h2[data-testid="label-output-value"]', timeout=120000)
-
-            # Extract results
-            print("[*] Extracting main results...")
-            headers = frame.locator('h2[data-testid="label-output-value"]')
-            main_results = []
-            for i in range(headers.count()):
-                text = headers.nth(i).inner_text()
-                main_results.append(text)
-                print(f"- {text}")
-
-            print("[*] Extracting confidence scores...")
-            confidence_data = {}
-            # Give time for all confidence scores to fully render
-            page.wait_for_timeout(2000)
-            
-            # Improved JavaScript extraction of confidence scores for reliability
-            print("[*] Using JavaScript to extract confidence scores...")
-            js_extracted_scores = frame.evaluate('''() => {
-                let scores = {};
-                // Look for confidence scores in various formats
-                document.querySelectorAll('.confidence-set, .score-item, dt, .score-label').forEach(item => {
-                    let label = '';
-                    let score = '';
-                    
-                    // Check if this is a containing element with both label and score
-                    if (item.querySelector('dt,dd')) {
-                        label = item.querySelector('dt')?.innerText || '';
-                        score = item.querySelector('dd')?.innerText || '';
-                    }
-                    // Or if it's just a label element with a next sibling as score
-                    else if (item.nextElementSibling && 
-                            (item.nextElementSibling.tagName === 'DD' || 
-                             item.nextElementSibling.classList.contains('score-value'))) {
-                        label = item.innerText || '';
-                        score = item.nextElementSibling.innerText || '';
-                    }
-                    
-                    if (label && score) {
-                        scores[label.trim()] = score.trim();
-                    }
-                });
-                
-                return scores;
-            }''')
-            
-            # Use the extracted scores or fall back to the regular method
-            if js_extracted_scores and len(js_extracted_scores) > 0:
-                confidence_data = js_extracted_scores
-                print(f"[*] Extracted {len(confidence_data)} scores via JavaScript: {confidence_data}")
-            else:
-                # Fallback to traditional method
-                print("[*] Falling back to traditional score extraction...")
-                buttons = frame.locator('button.confidence-set, .score-item')
-                for i in range(buttons.count()):
-                    try:
-                        model = buttons.nth(i).locator('dt').inner_text()
-                        confidence = buttons.nth(i).locator('dd').inner_text()
-                        confidence_data[model] = confidence
-                        print(f"{model}: {confidence}")
-                    except Exception as item_error:
-                        print(f"[!] Error extracting score item {i}: {str(item_error)}")
-
-            # Also take a screenshot for debugging
-            screenshot_path = os.path.join(UPLOAD_FOLDER, f"faceonlive_result_{uuid.uuid4().hex}.png")
-            page.screenshot(path=screenshot_path)
-            print(f"[*] Screenshot saved to {screenshot_path}")
-            
-            # Process verdict and confidence
-            verdict = main_results[0] if main_results else "Unknown"
-            is_fake = "fake" in verdict.lower() or "deepfake" in verdict.lower() or "ai" in verdict.lower()
-            
-            # Enhanced results with more context for frontend
-            results = {
-                'success': True,
-                'verdict': verdict,
-                'is_fake': is_fake,
-                'confidence_scores': confidence_data,
-                'main_results': main_results,
-                'source': 'FaceOnLive',
-                'rawText': f"Verdict: {verdict}\n" + "\n".join([f"{k}: {v}" for k, v in confidence_data.items()]),
-                'imageUrl': image_path  # Return the path to the uploaded image
-            }
-            
-            print(f"[*] Final results: {results}")
-            
-            # Make sure we actually got results - if not, return an error
-            if not confidence_data and (not main_results or main_results[0] == "No clear verdict found"):
-                print("[!] No valid results extracted after detection completed")
-                error_screenshot = os.path.join(UPLOAD_FOLDER, f"faceonlive_no_results_{uuid.uuid4().hex}.png")
-                page.screenshot(path=error_screenshot)
-                
-                return {
-                    'rawText': 'خطأ: لم يتم العثور على نتائج صالحة',
-                    'source': 'Error',
-                    'error': 'No valid results found',
-                    'success': False,
-                    'imageUrl': image_path,
-                    'screenshot': error_screenshot
-                }
-            
-            # Cleanup with error handling
-            try:
-                context.close()
-                browser.close()
-                print("[*] Browser closed successfully")
-            except Exception as close_error:
-                print(f"[!] Error closing browser: {str(close_error)}")
-            
-            # Take a final screenshot before closing everything
-            try:
-                final_screenshot = os.path.join(UPLOAD_FOLDER, f"faceonlive_final_{uuid.uuid4().hex}.png")
-                page.screenshot(path=final_screenshot)
-                print(f"[*] Final screenshot: {final_screenshot}")
-            except Exception as screenshot_error:
-                print(f"[!] Failed to take final screenshot: {str(screenshot_error)}")
-                
-            # Keep the image for debugging in case of issues
-            # If you want to remove it later, uncomment the code below:
-            # try:
-            #     if os.path.exists(image_path):
-            #         os.remove(image_path)
-            #         print(f"[*] Removed temporary file: {image_path}")
-            # except Exception as e:
-            #     print(f"[!] Failed to remove temp file: {str(e)}")
-                
-            return results
-    except Exception as e:
-        print(f"[!] Error in FaceOnLive scraper: {str(e)}")
-        traceback.print_exc()
-        
-        # Attempt to take an error screenshot
-        error_screenshot = None
-        try:
-            error_screenshot = os.path.join(UPLOAD_FOLDER, f"faceonlive_error_{uuid.uuid4().hex}.png")
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=False)
-                page = browser.new_page()
-                page.goto("https://faceonlive.com/projects/deepfake-detection-sdk/")
-                page.screenshot(path=error_screenshot)
-                browser.close()
-                print(f"[*] Error screenshot saved: {error_screenshot}")
-        except Exception as screenshot_error:
-            print(f"[!] Could not take error screenshot: {str(screenshot_error)}")
-        
-        return {
-            'error': f'خطأ أثناء التحليل: {str(e)}',
-            'rawText': f'خطأ أثناء التحليل: {str(e)}',
-            'source': 'Error',
-            'success': False,
-            'imageUrl': image_path,
-            'screenshot': error_screenshot if error_screenshot else None
-        }
-
-# Original functions restored with proper route decorators
 @app.route('/api/faceonlive-detection', methods=['POST'])
 @app.route('/ai-detect-faceonlive', methods=['POST'])  # Keep old route for compatibility
 def ai_detect_faceonlive():
