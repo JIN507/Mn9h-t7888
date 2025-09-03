@@ -192,54 +192,97 @@ try:
 except Exception:
     pass
 
-ZENSERP_API_KEY = "b0f34e80-874b-11f0-97ae-b7e85e6c575f"
+SERPAPI_API_KEY = "f19f41b57f6cbe4de6795e8eebd4f3a602fadfe6339f15d98d63ffa858798bfc"
 
-def scrape_reverse_search(image_url, connect_to=8, read_to=50):
+def scrape_reverse_search(image_url):
+    """
+    Drop-in replacement: uses SerpAPI Google Reverse Image only.
+    Keeps the same return structure your app expects.
+    """
     try:
-        print(f'[*] Starting reverse image search for: {image_url}')
+        print(f'[*] Starting reverse image search (SerpAPI) for: {image_url}')
+        # keep your existing manual search links helper
         search_links = search_images(image_url)
 
-        zenserp_key = os.getenv('ZENSERP_API_KEY') or ZENSERP_API_KEY
-        print('[-] Using key suffix:', (zenserp_key or '')[-6:])
-        headers = {'apikey': zenserp_key}
+        params = {
+            'engine': 'google_reverse_image',
+            'image_url': image_url,
+            'api_key': SERPAPI_API_KEY,
+            'device': 'desktop',
+            'google_domain': 'google.com',  # change to 'google.com.sa' if you prefer
+            'gl': 'sa',
+            'hl': 'ar',
+        }
 
         try:
-            print(f'[*] Querying ZenSerp API (connect={connect_to}s, read={read_to}s)')
-            response = requests.get(
-                'https://app.zenserp.com/api/v2/search',
-                headers=headers,
-                params={'image_url': image_url},
-                timeout=(connect_to, read_to)
-            )
-            print(f'[*] ZenSerp status={response.status_code}, elapsed={getattr(response, "elapsed", None)}')
+            resp = requests.get('https://serpapi.com/search.json', params=params, timeout=(6, 20))
+            print(f'[*] SerpAPI status={resp.status_code}')
+            if resp.status_code != 200:
+                return {
+                    'links': [],
+                    'search_urls': search_links,
+                    'source': 'SerpAPI',
+                    'error': f'SerpAPI HTTP {resp.status_code}: {resp.text[:200]}',
+                    'success': True
+                }
 
-            if response.status_code == 200:
-                data = response.json()
-                organic = (data.get('reverse_image_results', {}).get('organic', [])
-                           or data.get('organic_results', []))
-                links = [r.get('url') for r in organic if isinstance(r, dict) and r.get('url')]
-                return {'links': links or [], 'search_urls': search_links, 'source': 'ZenSerp API', 'success': True}
+            data = resp.json()
 
-            body = ''
-            try: body = response.text[:300]
-            except: pass
-            return {'links': [], 'search_urls': search_links, 'source': 'Search Engine Links',
-                    'error': f'ZenSerp HTTP {response.status_code}: {body}', 'success': True}
+            # collect candidate links from common fields
+            buckets = []
+            for key in ('image_results', 'inline_images', 'visual_matches', 'organic_results'):
+                val = data.get(key)
+                if isinstance(val, list):
+                    buckets.extend(val)
 
-        except requests.exceptions.ReadTimeout:
-            # أهم شيء: **لا** نرمي الاستثناء — نرجّع نتيجة بديلة
-            return {'links': [], 'search_urls': search_links,
-                    'source': 'Search Engine Links (Timeout)',
-                    'error': f'ZenSerp ReadTimeout ({read_to}s)', 'success': True}
+            links = []
+            for item in buckets:
+                if not isinstance(item, dict):
+                    continue
+                url = item.get('link') or item.get('source') or item.get('original') or item.get('image')
+                if url:
+                    links.append(url)
 
+            # de-duplicate while preserving order
+            seen, uniq = set(), []
+            for u in links:
+                if u not in seen:
+                    seen.add(u)
+                    uniq.append(u)
+
+            return {
+                'links': uniq,
+                'search_urls': search_links,
+                'source': 'SerpAPI',
+                'success': True
+            }
+
+        except requests.exceptions.Timeout as e:
+            return {
+                'links': [],
+                'search_urls': search_links,
+                'source': 'Search Engine Links (Timeout)',
+                'error': f'SerpAPI timeout: {e}',
+                'success': True
+            }
         except requests.RequestException as e:
-            return {'links': [], 'search_urls': search_links,
-                    'source': 'Search Engine Links (API Failed)', 'error': str(e), 'success': True}
+            traceback.print_exc()
+            return {
+                'links': [],
+                'search_urls': search_links,
+                'source': 'Search Engine Links (API Failed)',
+                'error': str(e),
+                'success': True
+            }
 
     except Exception as e:
-        return {'links': [], 'search_urls': {}, 'error': str(e), 'success': False}
-
-
+        traceback.print_exc()
+        return {
+            'links': [],
+            'search_urls': {},
+            'error': str(e),
+            'success': False
+        }
 def extract_frames(video_file, frame_interval=2):
     """Extract frames from video file at specified time intervals"""
     video = cv2.VideoCapture(video_file)

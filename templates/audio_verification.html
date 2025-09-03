@@ -5,12 +5,16 @@
 <style>
     /* Drag and drop styling */
     .upload-area {
-        transition: all 0.3s ease;
-        background-color: rgba(37, 99, 235, 0.05);
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        background: linear-gradient(135deg, rgba(67, 56, 202, 0.05) 0%, rgba(67, 56, 202, 0.1) 100%);
+        border: 2px dashed var(--primary-purple) !important;
+        border-radius: 20px;
     }
     .upload-area:hover {
-        background-color: rgba(37, 99, 235, 0.1);
-        border-color: #2563eb !important;
+        background: linear-gradient(135deg, rgba(67, 56, 202, 0.1) 0%, rgba(67, 56, 202, 0.15) 100%);
+        border-color: var(--primary-dark) !important;
+        transform: translateY(-2px) scale(1.01);
+        box-shadow: var(--shadow-card);
     }
     
     /* Spinning animation */
@@ -36,7 +40,7 @@
         position: relative;
         border-radius: 50%;
         box-sizing: content-box;
-        border: 4px solid #4CAF50;
+        border: 4px solid var(--success-color, #4CAF50);
     }
     .success-checkmark .check-icon::before {
         top: 3px;
@@ -93,22 +97,22 @@
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-md-8">
-        <div class="card shadow-sm mb-4">
-            <div class="card-header text-center bg-primary text-white">
+        <div class="card shadow-lg" style="border-radius: 20px; border: none; background: var(--card-bg); box-shadow: var(--shadow-card);">
+            <div class="card-header text-center text-white" style="background: var(--gradient-primary); border-radius: 20px 20px 0 0; border: none; padding: 20px;">
                 <h2 class="mb-0">التحقق من الصوت باستخدام الذكاء الاصطناعي</h2>
             </div>
-            <div class="card-body">
+            <div class="card-body" style="background: var(--card-bg); padding: 30px;">
                 <p class="lead text-center">قم برفع المقطع الصوتي ليتم معالجته</p>
                 
                 <form id="audioUploadForm" enctype="multipart/form-data" class="mb-4">
-                    <div class="card mb-4 border-primary">
-                        <div class="card-header bg-primary bg-opacity-10 text-primary fw-bold">
+                    <div class="card mb-4" style="border: 1px solid var(--primary-purple); border-radius: 15px; background: var(--card-bg); box-shadow: var(--shadow-card);">
+                        <div class="card-header fw-bold" style="background: linear-gradient(135deg, rgba(67, 56, 202, 0.1) 0%, rgba(67, 56, 202, 0.05) 100%); color: var(--primary-purple); border-radius: 15px 15px 0 0; border: none; padding: 15px;">
                             <i class="bi bi-music-note-beamed me-2"></i>اختيار الملف الصوتي
                         </div>
                         <div class="card-body">
                             <div class="file-upload-wrapper text-center mb-3">
                                 <div class="upload-area p-4 border border-2 border-dashed rounded position-relative mb-3" id="uploadArea">
-                                    <i class="bi bi-cloud-arrow-up-fill fs-1 mb-2" style="color: #2563eb;"></i>
+                                    <i class="bi bi-cloud-arrow-up-fill fs-1 mb-2" style="color: var(--primary-purple);"></i>
                                     <p class="mb-1">اسحب وأفلت الملف الصوتي هنا أو اضغط للتصفح</p>
                                     <input class="form-control position-absolute top-0 start-0 opacity-0 w-100 h-100" type="file" id="audioFile" name="audio" accept="audio/*" style="cursor: pointer;">
                                     <small class="text-muted d-block">الصيغ المدعومة: mp3, wav, m4a, etc.</small>
@@ -120,7 +124,7 @@
                                             <span id="selectedFileName" class="fw-bold"></span>
                                             <small id="selectedFileSize" class="d-block text-muted"></small>
                                         </div>
-                                        <button type="button" id="removeFile" class="btn btn-sm btn-outline-danger ms-auto">إزالة</button>
+                                        <button type="button" id="removeFile" class="btn btn-sm btn-outline-danger ms-auto" style="border-radius: 25px; padding: 6px 15px; font-weight: 500; transition: all 0.3s ease;">إزالة</button>
                                     </div>
                                 </div>
                             </div>
@@ -128,7 +132,7 @@
                     </div>
                     
                     <div class="d-grid gap-2">
-                        <button type="submit" class="btn btn-primary btn-lg" id="analyzeButton">
+                        <button type="submit" class="btn btn-primary btn-lg" id="analyzeButton" style="border-radius: 50px; padding: 15px 35px; font-weight: 600; background: var(--gradient-primary); border: none; box-shadow: var(--shadow-button); transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); letter-spacing: 0.5px;">
                             <div class="d-flex align-items-center justify-content-center">
                                 <div class="spinner-border spinner-border-sm me-2 d-none" role="status" aria-hidden="true" id="analyzeSpinner"></div>
                                 <span>تحليل الملف الصوتي</span>
