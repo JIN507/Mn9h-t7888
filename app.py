@@ -1,4 +1,6 @@
-import os
+import os, time, traceback, requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import sys
 import re
 import json
@@ -16,7 +18,6 @@ import cv2
 import numpy as np
 from PIL import Image
 import io
-import os
 from flask import Flask, render_template, request, url_for, redirect, flash, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -26,7 +27,6 @@ import uuid
 import urllib.request
 import asyncio
 import hashlib
-import time
 
 # Import requests for direct API calls
 import traceback
@@ -175,53 +175,95 @@ def search_images(image_url):
         'tineye': f"https://tineye.com/search?url={image_url}"
     }
 
-ZENSERP_API_KEY = "54f49710-57fb-11f0-b038-cf26fb8f0bad"
+from io import BytesIO
 
-def scrape_reverse_search(image_url):
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except Exception:
+    PIL_AVAILABLE = False
+
+import os, requests, traceback
+
+# (اختياري) إجبار IPv4 — يفيد لو الشبكة عندك تتعلّق على IPv6
+try:
+    import socket, urllib3.util.connection as urllib3_cn
+    urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
+except Exception:
+    pass
+
+ZENSERP_API_KEY = "b0f34e80-874b-11f0-97ae-b7e85e6c575f"
+
+def scrape_reverse_search(image_url, connect_to=8, read_to=50):
     try:
         print(f'[*] Starting reverse image search for: {image_url}')
-        
-        # Generate search links for different engines
+
+        # روابط البحث اليدوي (كما هي)
         search_links = search_images(image_url)
-        
-        # Use ZenSerp API for direct search results
+
         zenserp_key = os.getenv('ZENSERP_API_KEY') or ZENSERP_API_KEY
+        print('[-] Using key suffix:', (zenserp_key or '')[-6:])  # تأكد أنه المفتاح الجديد
         headers = {'apikey': zenserp_key}
-        params = {'image_url': image_url}
-        
+        params  = {'image_url': image_url}
+
         try:
-            print('[*] Querying ZenSerp API for reverse image search')
+            print(f'[*] Querying ZenSerp API (connect={connect_to}s, read={read_to}s)')
             response = requests.get(
                 'https://app.zenserp.com/api/v2/search',
                 headers=headers,
                 params=params,
-                timeout=15
+                timeout=(connect_to, read_to)  # <-- رَفَعْنا المهلة
             )
-            
+            print(f'[*] ZenSerp status={response.status_code}, elapsed={getattr(response, "elapsed", None)}')
+
             if response.status_code == 200:
                 data = response.json()
-                organic = data.get('reverse_image_results', {}).get('organic', [])
-                links = [r['url'] for r in organic if r.get('url')]
-                
-                print(f'[*] Found {len(links)} results from ZenSerp API')
+                organic = data.get('reverse_image_results', {}).get('organic', []) or data.get('organic_results', [])
+                links = [r.get('url') for r in organic if isinstance(r, dict) and r.get('url')]
+
+                print(f'[*] Found {len(links)} links from ZenSerp')
                 return {
-                    'links': links,
+                    'links': links or [],
                     'search_urls': search_links,
                     'source': 'ZenSerp API',
                     'success': True
                 }
-            else:
-                print(f'[!] ZenSerp API error: {response.status_code}')
+
+            # شخّص أخطاء المصادقة/الحصّة بسرعة
+            body = ''
+            try:
+                body = response.text[:300]
+            except Exception:
+                pass
+
+            if response.status_code in (401, 402, 403):
                 return {
                     'links': [],
                     'search_urls': search_links,
                     'source': 'Search Engine Links',
-                    'error': f'ZenSerp API error: {response.status_code}',
+                    'error': f'ZenSerp auth/quota error {response.status_code}: {body}',
                     'success': True
                 }
-        
-        except Exception as e:
-            print(f'[!] Error with ZenSerp API: {e}')
+
+            return {
+                'links': [],
+                'search_urls': search_links,
+                'source': 'Search Engine Links',
+                'error': f'ZenSerp HTTP {response.status_code}: {body}',
+                'success': True
+            }
+
+        except requests.exceptions.ReadTimeout as e:
+            print(f'[!] ReadTimeout after {read_to}s: {e}')
+            return {
+                'links': [],
+                'search_urls': search_links,
+                'source': 'Search Engine Links (Timeout)',
+                'error': f'ZenSerp ReadTimeout ({read_to}s)',
+                'success': True
+            }
+        except requests.RequestException as e:
+            print(f'[!] RequestException: {e}')
             traceback.print_exc()
             return {
                 'links': [],
@@ -240,6 +282,7 @@ def scrape_reverse_search(image_url):
             'error': str(e),
             'success': False
         }
+
 
 def extract_frames(video_file, frame_interval=2):
     """Extract frames from video file at specified time intervals"""

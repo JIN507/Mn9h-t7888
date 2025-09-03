@@ -119,7 +119,25 @@
                         </button>
                     </li>
                 </ul>
+                <script>
+                    // Change tab colors on selection
+                    const model1Tab = document.getElementById('model1-tab');
+                    const model2Tab = document.getElementById('model2-tab');
 
+                    model1Tab.addEventListener('click', function() {
+                        model1Tab.style.color = '#2563eb';
+                        model1Tab.style.borderBottomColor = '#2563eb';
+                        model2Tab.style.color = '#6c757d';
+                        model2Tab.style.borderBottomColor = 'transparent';
+                    });
+
+                    model2Tab.addEventListener('click', function() {
+                        model2Tab.style.color = '#2563eb';
+                        model2Tab.style.borderBottomColor = '#2563eb';
+                        model1Tab.style.color = '#6c757d';
+                        model1Tab.style.borderBottomColor = 'transparent';
+                    });
+                </script>
                 <!-- Form for image upload -->
                 <form id="ai-detection-form" class="mb-4" enctype="multipart/form-data">
                     <div class="card mb-4" style="border-color: #2563eb">
