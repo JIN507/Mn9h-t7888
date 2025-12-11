@@ -2,12 +2,7 @@ services:
   - type: web
     name: bahith-al-suwar
     env: python
-    buildCommand: |
-      pip install -r requirements.txt && \
-      wget -O chromium.zip "https://s3.eu-north-1.amazonaws.com/chromium.file/chromium.zip" && \
-      unzip -o chromium.zip -d /tmp/chromium/ && \
-      wget -O user_data.zip "https://s3.eu-north-1.amazonaws.com/chromium.file/userdata/user_data.zip" && \
-      unzip -o user_data.zip -d /tmp/
+    buildCommand: "./build.sh"
     startCommand: gunicorn app:app
     envVars:
       - key: USER_DATA_PATH

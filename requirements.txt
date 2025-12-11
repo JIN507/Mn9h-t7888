@@ -16,3 +16,6 @@ SpeechRecognition==3.10.0
 google-cloud-vision==3.4.0
 # Production server
 gunicorn==20.1.0
+# Translation and Date parsing
+deep-translator==1.11.4
+dateparser==1.2.0

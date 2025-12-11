@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 from PIL import Image
 import io
-from flask import Flask, render_template, request, url_for, redirect, flash, jsonify
+from flask import Flask, render_template, request, url_for, redirect, flash, jsonify, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
@@ -67,11 +67,27 @@ except ImportError:
 import concurrent.futures
 
 # Initialize Flask
-app = Flask(__name__)
+# Initialize Flask
+# Serve static files from 'frontend/dist/assets' available at '/assets'
+# Serve templates (index.html) from 'frontend/dist'
+app = Flask(__name__, static_folder='frontend/dist/assets', static_url_path='/assets', template_folder='frontend/dist')
 CORS(app)
 
 # Load environment variables
 load_dotenv()
+
+# Serve React App
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+# Catch-all route for React client-side routing
+@app.route('/<path:path>')
+def catch_all(path):
+    # Check if path exists in static folder (e.g. for other assets)
+    if path and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    return render_template('index.html')
 
 # Config
 UPLOAD_FOLDER = 'uploads'
@@ -95,7 +111,9 @@ app.config['MAX_CONTENT_LENGTH'] = 256 * 1024 * 1024  # 256MB max upload
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Create audio upload folder if it doesn't exist - inside static for web access
-AUDIO_UPLOAD_FOLDER = os.path.join('static', 'uploads', 'audio')
+# Note: Since we changed static_folder, we need to handle user uploads carefully.
+# We'll serve uploads via a specific route or keep them in root 'static' and serve manually.
+AUDIO_UPLOAD_FOLDER = os.path.join('uploads', 'audio') # Removed 'static' prefix to avoid confusion with React static
 os.makedirs(AUDIO_UPLOAD_FOLDER, exist_ok=True)
 
 # Allowed file extensions
