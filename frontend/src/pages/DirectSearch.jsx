@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Search, Image as ImageIcon, AlertCircle } from 'lucide-react';
 import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
@@ -7,11 +8,20 @@ import DropZone from '../components/DropZone';
 import ResultsTimeline from '../components/ResultsTimeline';
 
 const DirectSearch = () => {
+    const location = useLocation();
     const [selectedFile, setSelectedFile] = useState(null);
     const [loading, setLoading] = useState(false);
     const [results, setResults] = useState(null);
     const [error, setError] = useState(null);
     const [debugInfo, setDebugInfo] = useState(null);
+
+    // Handle file passed from navigation (e.g. from Video Analysis)
+    useEffect(() => {
+        if (location.state?.file) {
+            setSelectedFile(location.state.file);
+            // Optional: Auto-trigger search? Maybe better to let user click search.
+        }
+    }, [location.state]);
 
     const handleSearch = async (e) => {
         e.preventDefault();

@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Globe, ExternalLink, Clock, MapPin } from 'lucide-react';
 import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
@@ -6,10 +7,18 @@ import GradientButton from '../components/GradientButton';
 import DropZone from '../components/DropZone';
 
 const Provenance = () => {
+    const location = useLocation();
     const [file, setFile] = useState(null);
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
     const [error, setError] = useState(null);
+
+    // Handle file passed from navigation
+    useEffect(() => {
+        if (location.state?.file) {
+            setFile(location.state.file);
+        }
+    }, [location.state]);
 
     const handleAnalyze = async () => {
         if (!file) return;

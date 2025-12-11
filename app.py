@@ -1468,6 +1468,90 @@ def scrape_thehive(image_url):
             print(f'[!] Error removing temp file: {str(e)}')
         print('[*] Sightengine detection (Model 1) completed')
 
+# Video Analysis Endpoint
+@app.route('/api/analyze-video', methods=['POST'])
+def api_analyze_video():
+    """Analyze video for AI content using AIorNot API"""
+    print('[*] Received video analysis request')
+    
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded', 'success': False}), 400
+        
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected', 'success': False}), 400
+
+    # Save temp file
+    temp_filename = secure_filename(f"vid_{uuid.uuid4()}_{file.filename}")
+    temp_path = os.path.join(UPLOAD_FOLDER, temp_filename)
+    
+    try:
+        file.save(temp_path)
+        print(f'[*] Video saved to {temp_path}')
+        
+        # Determine file size
+        file_size = os.path.getsize(temp_path)
+        print(f'[*] File size: {file_size / (1024*1024):.2f} MB')
+        
+        # Check API Key
+        aiornot_key = os.environ.get('AIORNOT_API_KEY')
+        if not aiornot_key:
+             return jsonify({'error': 'AIorNot API Key missing', 'success': False}), 500
+
+        # Call AIorNot API
+        print('[*] Calling AIorNot Video API...')
+        
+        # Using requests to post multipart/form-data
+        url = "https://api.aiornot.com/v2/video/sync"
+        # Request all relevant checks
+        # Note: 'only' param needs to be sent as multiple values with same key 'only' usually, 
+        # or list depending on how requests handles it. AIorNot docs say "Array of analysis types".
+        # Requests 'data' with list values handles this as 'only': ['val1', 'val2'] which normally sends multiple params.
+        # Let's verify standard requests behavior.
+        payload = {
+            'only': ['ai_video', 'ai_voice', 'ai_music', 'deepfake_video'] 
+        }
+        
+        # We need to open the file again for reading
+        with open(temp_path, 'rb') as f:
+            files = [
+                ('video', (file.filename, f, 'application/octet-stream'))
+            ]
+            headers = {
+                'Authorization': f'Bearer {aiornot_key}',
+                'Accept': 'application/json'
+            }
+            
+            # 120s timeout as requested
+            response = requests.post(url, headers=headers, data=payload, files=files, timeout=120)
+
+        print(f'[*] AIorNot Response Status: {response.status_code}')
+        
+        if response.status_code == 200:
+            result = response.json()
+            return jsonify({'success': True, 'data': result})
+        elif response.status_code == 422:
+             print(f'[!] Validation Error: {response.text}')
+             return jsonify({'error': 'Validation Error (Check file format/parameters)', 'details': response.json(), 'success': False}), 422
+        else:
+            print(f'[!] AIorNot Error: {response.text}')
+            return jsonify({'error': f'AIorNot API Error: {response.status_code}', 'details': response.text, 'success': False}), response.status_code
+
+    except requests.exceptions.Timeout:
+        return jsonify({'error': 'Request timed out (Video might be too long)', 'success': False}), 504
+    except Exception as e:
+        print(f'[!] Error in video analysis: {e}')
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'success': False}), 500
+    finally:
+        # Cleanup
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+                print(f'[*] Removed temp video: {temp_path}')
+            except:
+                pass
+
 # FaceOnLive implementation using the new scraper code
 
 @app.route('/api/faceonlive-detection', methods=['POST'])

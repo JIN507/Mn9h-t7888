@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { ShieldCheck, AlertTriangle, Sparkles, Cpu, Brain, X } from 'lucide-react';
 import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
@@ -46,39 +47,39 @@ const ResultCard = ({ result, title, icon: Icon, gradientFrom, gradientTo, error
 
             <div className="text-center mb-4">
                 <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full mb-3 ${isAI
-                        ? 'bg-gradient-to-br from-red-400 to-rose-500 text-white'
-                        : 'bg-gradient-to-br from-emerald-400 to-green-500 text-white'
-                    }`}>
-                    <ShieldCheck className="w-8 h-8" />
+                    ? 'bg-gradient-to-br from-red-400 to-rose-500 text-white'
+                    : 'bg-gradient-to-br from-emerald-400 to-green-500 text-white'
+                    } shadow-lg shadow-primary-500/20`}>
+                    {isAI ? <AlertTriangle className="w-8 h-8" /> : <ShieldCheck className="w-8 h-8" />}
                 </div>
-                <h4 className="text-xl font-black">
-                    {result.verdict || (isAI ? 'مولدة بالذكاء الاصطناعي' : 'صورة حقيقية')}
+                <h4 className={`text-lg font-black ${isAI ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {result.verdict}
                 </h4>
             </div>
 
             <div className="space-y-3">
                 <div>
                     <div className="flex justify-between text-xs font-bold mb-1">
-                        <span>احتمالية AI</span>
-                        <span className="text-red-600">{((result.confidence_ai || 0) * 100).toFixed(1)}%</span>
+                        <span className="text-slate-600">احتمالية AI</span>
+                        <span className="text-primary-600">{Math.round(result.confidence_ai * 100)}%</span>
                     </div>
                     <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                         <div
-                            className="h-full bg-gradient-to-r from-red-400 to-rose-500 transition-all duration-1000 ease-out rounded-full"
-                            style={{ width: `${(result.confidence_ai || 0) * 100}%` }}
+                            className="h-full bg-gradient-to-r from-red-400 to-rose-500 transition-all duration-1000"
+                            style={{ width: `${result.confidence_ai * 100}%` }}
                         ></div>
                     </div>
                 </div>
 
                 <div>
                     <div className="flex justify-between text-xs font-bold mb-1">
-                        <span>احتمالية بشري</span>
-                        <span className="text-green-600">{((result.confidence_human || 0) * 100).toFixed(1)}%</span>
+                        <span className="text-slate-600">احتمالية حقيقي</span>
+                        <span className="text-emerald-600">{Math.round(result.confidence_human * 100)}%</span>
                     </div>
                     <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                         <div
-                            className="h-full bg-gradient-to-r from-emerald-400 to-green-500 transition-all duration-1000 ease-out rounded-full"
-                            style={{ width: `${(result.confidence_human || 0) * 100}%` }}
+                            className="h-full bg-gradient-to-r from-emerald-400 to-green-500 transition-all duration-1000"
+                            style={{ width: `${result.confidence_human * 100}%` }}
                         ></div>
                     </div>
                 </div>
