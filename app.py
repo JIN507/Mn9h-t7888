@@ -791,11 +791,24 @@ def direct_search_api():
             
             # Helper to extract date from snippet text if date_str is missing
             if not date_str and snippet:
-                # Basic regex for dates like "Oct 25, 2023" or "2023-10-25"
+                # Expanded Regex for English and Arabic dates
                 import re
-                date_match = re.search(r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2},? \d{4}\b|\b\d{4}-\d{2}-\d{2}\b', snippet)
-                if date_match:
-                    date_str = date_match.group(0)
+                date_candidates = []
+                
+                # 1. Standard Date: "Oct 25, 2023" or "2023-10-25"
+                match_std = re.search(r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2},? \d{4}\b|\b\d{4}-\d{2}-\d{2}\b', snippet, re.IGNORECASE)
+                if match_std: date_candidates.append(match_std.group(0))
+
+                # 2. Relative English: "2 hours ago", "5 mins ago"
+                match_rel_en = re.search(r'\b\d+\s+(?:sec|min|hour|day|week|month|year)s?\s+ago\b', snippet, re.IGNORECASE)
+                if match_rel_en: date_candidates.append(match_rel_en.group(0))
+
+                # 3. Relative Arabic: "منذ 3 ساعات", "منذ يومين"
+                match_rel_ar = re.search(r'\bمنذ\s+(?:\d+|يومين|ساعتين)\s+(?:ثواني|ثانية|دقائق|دقيقة|ساعات|ساعة|أيام|يوم|أسابيع|أسبوع|أشهر|شهر|سنوات|سنة)\b', snippet)
+                if match_rel_ar: date_candidates.append(match_rel_ar.group(0))
+                
+                if date_candidates:
+                    date_str = date_candidates[0]
 
             # Try to extract domain
             domain = 'Web'
@@ -806,12 +819,13 @@ def direct_search_api():
                 except:
                     pass
 
-            # Timestamp parsing
+            # Timestamp parsing with better language support
             timestamp = None
             if date_str:
                 try:
                     if DATEPARSER_AVAILABLE:
-                         dt = dateparser.parse(date_str)
+                         # Explicitly hint Arabic and English
+                         dt = dateparser.parse(date_str, languages=['ar', 'en'])
                          if dt: timestamp = dt.isoformat()
                 except:
                     pass
