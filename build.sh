@@ -20,6 +20,8 @@ nvm use $NODE_VERSION
 echo "Building Frontend..."
 cd frontend
 npm install
+# Fix permission denied error for vite binary
+chmod -R +x node_modules/.bin
 npm run build
 cd ..
 
