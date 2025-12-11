@@ -374,14 +374,9 @@ def extract_frames(video_file, frame_interval=2):
     video.release()
     return frames
 
-@app.route('/')
-def index():
-    return render_template('index.html')
 
-@app.route('/video')
-def video_page():
-    """Render the video frame extraction page"""
-    return render_template('video.html')
+
+
 
 @app.route('/api/extract-frames', methods=['POST'])
 def extract_frames_api():
@@ -429,14 +424,9 @@ def extract_frames_api():
             'error': str(e)
         }), 500
 
-@app.route('/about')
-def about():
-    return render_template('about.html')
 
-@app.route('/ai_detection')
-@app.route('/ai-detection')
-def ai_detection():
-    return render_template('ai_detection.html')
+
+
 
 @app.route('/ai-detect-thehive', methods=['POST'])
 def ai_detect_thehive():
@@ -689,11 +679,9 @@ def api_ai_detection():
                 print(f'[✓] Removed temporary file: {temp_path}')
         except Exception as e:
             print(f'[!] Error removing temporary file: {str(e)}')
-@app.route('/image-source-search', methods=['GET', 'POST'])
+@app.route('/image-source-search', methods=['POST'])
 def image_source_search():
-    if request.method == 'GET':
-        return render_template('image_source_search.html')
-    # POST:
+
     try:
         data = request.get_json(silent=True) or {}
         image_url = data.get('image_url') or request.form.get('image_url')
@@ -968,9 +956,7 @@ def api_image_source_search():
             
     return jsonify({'error': 'نوع الملف غير مدعوم'}), 400
 
-@app.route('/audio-verification')
-def audio_verification():
-    return render_template('audio_verification.html')
+
 
 @app.route('/verify-audio', methods=['POST'])
 @app.route('/api/verify-audio', methods=['POST'])
@@ -1129,11 +1115,7 @@ UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'upload
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # AI Detection page route - supporting both URL formats
-@app.route('/ai_detection')
-@app.route('/ai-detection')
-def ai_detection_page():
-    """Render the AI detection page"""
-    return render_template('ai_detection.html')
+
 
 # Function to upload images to ImgBB for public URL
 def upload_to_imgbb(image_data):
@@ -1538,10 +1520,7 @@ def ai_detect_faceonlive():
         # File cleanup is now handled inside the scrape_faceonlive function
         pass
 
-@app.route('/provenance')
-def provenance():
-    """Render the provenance page"""
-    return render_template('provenance.html')
+
 
 @app.route('/api/provenance', methods=['POST'])
 def api_provenance():
