@@ -40,14 +40,15 @@
                         </div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">عدد الإطارات المستخرجة:</label>
-                        <div class="d-flex justify-content-center" id="frame-density-options">
+                        <label class="form-label fw-bold text-center d-block mb-3">عدد الإطارات المستخرجة:</label>
+                        <div class="d-flex flex-column align-items-center" id="frame-density-options">
                             <input type="hidden" id="frame-interval" value="2">
-                            <div class="btn-group" role="group" aria-label="خيارات عدد الإطارات" style="border-radius: 25px; overflow: hidden; box-shadow: var(--shadow-button);">
-                                <button type="button" class="btn btn-outline-primary" data-value="1" style="border-color: var(--primary-purple); color: var(--primary-purple); font-weight: 500; transition: all 0.3s ease;">إطارات كثيرة</button>
-                                <button type="button" class="btn btn-primary active" data-value="2" style="background: var(--gradient-primary); border: none; font-weight: 600;">إطارات متوسطة</button>
-                                <button type="button" class="btn btn-outline-primary" data-value="5" style="border-color: var(--primary-purple); color: var(--primary-purple); font-weight: 500; transition: all 0.3s ease;">إطارات قليلة</button>
+                            <div class="btn-group" role="group" aria-label="خيارات عدد الإطارات" style="border-radius: 25px; overflow: hidden; box-shadow: 0 4px 12px rgba(67, 56, 202, 0.15); border: 2px solid var(--primary-purple);">
+                                <button type="button" class="btn btn-outline-primary frame-btn" data-value="1" style="padding: 12px 24px; font-weight: 600; transition: all 0.3s ease; min-width: 120px;">إطارات كثيرة</button>
+                                <button type="button" class="btn btn-primary frame-btn active" data-value="2" style="padding: 12px 24px; font-weight: 600; min-width: 120px;">إطارات متوسطة</button>
+                                <button type="button" class="btn btn-outline-primary frame-btn" data-value="5" style="padding: 12px 24px; font-weight: 600; transition: all 0.3s ease; min-width: 120px;">إطارات قليلة</button>
                             </div>
+                            <small class="text-muted mt-2" id="frame-description">سيتم استخراج إطار كل 2 ثانية</small>
                         </div>
                     </div>
                     <button type="submit" id="extract-btn" class="btn btn-primary btn-lg px-4" style="border-radius: 50px; padding: 15px 35px; font-weight: 600; background: var(--gradient-primary); border: none; box-shadow: var(--shadow-button); transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); letter-spacing: 0.5px;">استخراج الإطارات <i class="bi bi-camera"></i></button>
@@ -112,7 +113,17 @@
                 button.classList.add('btn-primary');
                 
                 // Update hidden input value
-                frameInterval.value = button.getAttribute('data-value');
+                const intervalValue = button.getAttribute('data-value');
+                frameInterval.value = intervalValue;
+                
+                // Update description text
+                const descriptionMap = {
+                    '1': 'سيتم استخراج إطار كل 1 ثانية (إطارات كثيرة)',
+                    '2': 'سيتم استخراج إطار كل 2 ثانية (إطارات متوسطة)',
+                    '5': 'سيتم استخراج إطار كل 5 ثواني (إطارات قليلة)'
+                };
+                document.getElementById('frame-description').textContent = descriptionMap[intervalValue];
+                
                 console.log('Frame interval updated to:', frameInterval.value);
             });
         });
@@ -252,15 +263,26 @@
                 videoPreviewContainer.classList.remove('d-none');
                 videoDropArea.classList.add('d-none');
                 
-                // Set the file name
+                // Set the file name and file info
                 const videoName = document.getElementById('video-name');
+                const videoInfo = document.getElementById('video-info');
                 if (videoName) videoName.textContent = file.name;
+                if (videoInfo) {
+                    const fileSize = (file.size / (1024 * 1024)).toFixed(2);
+                    videoInfo.textContent = `الحجم: ${fileSize} MB • النوع: ${file.type}`;
+                }
 
                 // Create object URL for the video
                 const url = URL.createObjectURL(file);
                 
-                // Set the source directly (simplest approach)
+                // Set the source and load the video
                 videoPreview.src = url;
+                videoPreview.load(); // Force reload
+                
+                // Add event listener to handle video load
+                videoPreview.addEventListener('loadedmetadata', function() {
+                    console.log('Video metadata loaded successfully');
+                }, { once: true });
                 
                 console.log('Video preview set up successfully');
             } catch (err) {
@@ -300,8 +322,8 @@
                 
                 const searchBtn = document.createElement('button');
                 searchBtn.className = 'btn btn-primary me-2';
-                searchBtn.textContent = 'البحث بهذا الإطار';
-                searchBtn.onclick = () => searchWithFrame(frame.data);
+                searchBtn.textContent = 'البحث العكسي';
+                searchBtn.onclick = () => sendToReverseSearch(frame.data);
                 
                 // Add AI detection button
                 const detectAiBtn = document.createElement('button');
@@ -309,17 +331,17 @@
                 detectAiBtn.textContent = 'فحص بالذكاء الاصطناعي';
                 detectAiBtn.onclick = () => sendToAiDetection(frame.data);
                 
-                // Add image source search button
-                const sourceSearchBtn = document.createElement('button');
-                sourceSearchBtn.className = 'btn btn-info mt-2';
-                sourceSearchBtn.textContent = 'البحث عن مصدر هذه الصورة';
-                sourceSearchBtn.onclick = () => searchForImageSource(frame.data);
+                // Add provenance button
+                const provenanceBtn = document.createElement('button');
+                provenanceBtn.className = 'btn btn-warning mt-2';
+                provenanceBtn.textContent = 'أصل المحتوى';
+                provenanceBtn.onclick = () => sendToProvenance(frame.data);
                 
                 cardBody.appendChild(title);
                 cardBody.appendChild(time);
                 cardBody.appendChild(searchBtn);
                 cardBody.appendChild(detectAiBtn);
-                cardBody.appendChild(sourceSearchBtn);
+                cardBody.appendChild(provenanceBtn);
                 
                 card.appendChild(img);
                 card.appendChild(cardBody);
@@ -339,83 +361,24 @@
             window.location.href = '/ai-detection';
         }
         
-        // Send frame to image source search page
-        function searchForImageSource(imageData) {
-            // الطريقة المباشرة: تخزين الصورة في localStorage وتحويل المستخدم مباشرة
-            // تخزين بيانات الصورة في localStorage
-            localStorage.setItem('pendingImageSourceSearch', imageData);
+        // Send frame to reverse search page
+        function sendToReverseSearch(imageData) {
+            // Store the image data in localStorage
+            localStorage.setItem('uploadedImage', imageData);
+            localStorage.setItem('pendingReverseSearch', imageData);
             
-            // الانتقال إلى صفحة البحث عن مصدر الصورة
-            window.location.href = '/image-source-search?from=video';
+            // Navigate to main reverse search page
+            window.location.href = '/?from=video';
         }
         
-        // Search with a specific frame
-        async function searchWithFrame(imageData) {
-            try {
-                // Show loading indicator
-                videoLoadingIndicator.classList.remove('d-none');
-                
-                const response = await fetch('/api/upload', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: `image=${encodeURIComponent(imageData)}`
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                
-                // Hide loading indicator
-                videoLoadingIndicator.classList.add('d-none');
-                
-                // Open a new window/tab with the search results
-                const searchWindow = window.open('', '_blank');
-                searchWindow.document.write(`
-                    <html dir="rtl" lang="ar">
-                    <head>
-                        <title>نتائج البحث بالإطار - باحث الصور</title>
-                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css">
-                    </head>
-                    <body>
-                        <div class="container my-4">
-                            <h1>نتائج البحث بالإطار</h1>
-                            <div class="row mb-4">
-                                <div class="col-md-4">
-                                    <img src="${data.imageUrl}" class="img-fluid border rounded" alt="Searched Frame">
-                                </div>
-                                <div class="col-md-8">
-                                    <h2>روابط البحث</h2>
-                                    <ul class="list-group">
-                                        <li class="list-group-item">
-                                            <a href="${data.searchResults.google}" target="_blank" class="btn btn-primary">Google بحث</a>
-                                        </li>
-                                        <li class="list-group-item">
-                                            <a href="${data.searchResults.bing}" target="_blank" class="btn btn-primary">Bing بحث</a>
-                                        </li>
-                                        <li class="list-group-item">
-                                            <a href="${data.searchResults.yandex}" target="_blank" class="btn btn-primary">Yandex بحث</a>
-                                        </li>
-                                        <li class="list-group-item">
-                                            <a href="${data.searchResults.tineye}" target="_blank" class="btn btn-primary">TinEye بحث</a>
-                                        </li>
-                                    </ul>
-                                </div>
-                            </div>
-                            <button class="btn btn-secondary" onclick="window.close()">إغلاق</button>
-                        </div>
-                    </body>
-                    </html>
-                `);
-                searchWindow.document.close();
-            } catch (error) {
-                console.error('Error:', error);
-                alert(`حدث خطأ: ${error.message}`);
-                videoLoadingIndicator.classList.add('d-none');
-            }
+        // Send frame to provenance analysis
+        function sendToProvenance(imageData) {
+            // Store the image data in localStorage
+            localStorage.setItem('pendingProvenance', imageData);
+            localStorage.setItem('uploadedImage', imageData);
+            
+            // Navigate to provenance page
+            window.location.href = '/provenance?from=video';
         }
         
         // Utility functions

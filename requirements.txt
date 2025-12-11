@@ -12,5 +12,7 @@ playwright==1.35.0
 # Captcha handling dependencies
 pydub==0.25.1
 SpeechRecognition==3.10.0
+# Google Cloud Vision API for reverse image search
+google-cloud-vision==3.4.0
 # Production server
 gunicorn==20.1.0

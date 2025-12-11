@@ -28,11 +28,43 @@ import urllib.request
 import asyncio
 import hashlib
 
+# Try to import Google Cloud Vision
+try:
+    from google.cloud import vision
+    VISION_API_AVAILABLE = True
+    
+    # Set credentials path if not already set
+    if not os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
+        credentials_path = os.path.join(os.path.dirname(__file__), 'google-credentials.json')
+        if os.path.exists(credentials_path):
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
+            print(f'[*] Google Cloud credentials set to: {credentials_path}')
+        # else:
+            # print('[!] google-credentials.json not found. Please set GOOGLE_APPLICATION_CREDENTIALS.')
+except ImportError:
+    VISION_API_AVAILABLE = False
+    print('[!] Google Cloud Vision not available. Install with: pip install google-cloud-vision')
+
 # Import requests for direct API calls
 import traceback
 
 # AI Detection imports
 from playwright.sync_api import sync_playwright
+
+# Provenance feature imports (with fallbacks)
+try:
+    from bs4 import BeautifulSoup
+    BS4_AVAILABLE = True
+except ImportError:
+    BS4_AVAILABLE = False
+
+try:
+    import dateparser
+    DATEPARSER_AVAILABLE = True
+except ImportError:
+    DATEPARSER_AVAILABLE = False
+
+import concurrent.futures
 
 # Initialize Flask
 app = Flask(__name__)
@@ -46,11 +78,15 @@ UPLOAD_FOLDER = 'uploads'
 # Create uploads directory if it doesn't exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # Hard-coded IMGBB API key (you should move this to .env file in production)
-IMGBB_API_KEY = '0a85906528efe824b2563d2ae563b68f'
-# AI or Not API Key for audio verification (updated from user input)
-AIORNOT_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjVjNDEyZDIxLTQ2MWUtNDc2My05ODVmLWQzZjI2NmY5Y2JlMCIsInVzZXJfaWQiOiI1YzQxMmQyMS00NjFlLTQ3NjMtOTg1Zi1kM2YyNjZmOWNiZTAiLCJhdWQiOiJhY2Nlc3MiLCJleHAiOjAuMH0.w-D35bZii8-wpZZig397pzfHUReAFnBTuKSQBjOI7cA'
+# API Keys from Environment
+IMGBB_API_KEY = os.environ.get('IMGBB_API_KEY')
+AIORNOT_API_KEY = os.environ.get('AIORNOT_API_KEY')
+SERPAPI_API_KEY = os.environ.get('SERPAPI_API_KEY')
+ZENSERP_API_KEY = os.environ.get('ZENSERP_API_KEY')
+
 # Setting environment variable as in the example
-os.environ['AIORNOT_API_KEY'] = AIORNOT_API_KEY
+if AIORNOT_API_KEY:
+    os.environ['AIORNOT_API_KEY'] = AIORNOT_API_KEY
 # The exact endpoints from the API docs
 VOICE_ENDPOINT = "https://api.aiornot.com/v1/reports/voice"
 IMAGE_ENDPOINT = "https://api.aiornot.com/v1/reports/image"
@@ -119,12 +155,15 @@ def extract_frames_from_video(video_path, frame_interval):
             # Extract frame at specified interval
             if frame_count % frame_interval_frames == 0:
                 # Convert frame to base64 encoded string
-                _, buffer = cv2.imencode('.jpg', frame)
-                img_str = base64.b64encode(buffer).decode('utf-8')
-                frames.append({
-                    'data': f'data:image/jpeg;base64,{img_str}',
-                    'timestamp': frame_count / fps if fps > 0 else 0
-                })
+                try:
+                    _, buffer = cv2.imencode('.jpg', frame)
+                    img_str = base64.b64encode(buffer).decode('utf-8')
+                    frames.append({
+                        'data': f'data:image/jpeg;base64,{img_str}',
+                        'timestamp': frame_count / fps if fps > 0 else 0
+                    })
+                except Exception as e:
+                    print(f"Error encoding frame {frame_count}: {e}")
             
             frame_count += 1
         
@@ -192,7 +231,7 @@ try:
 except Exception:
     pass
 
-SERPAPI_API_KEY = "f19f41b57f6cbe4de6795e8eebd4f3a602fadfe6339f15d98d63ffa858798bfc"
+# SERPAPI Key loaded from env above
 
 def scrape_reverse_search(image_url):
     """
@@ -215,7 +254,7 @@ def scrape_reverse_search(image_url):
         }
 
         try:
-            resp = requests.get('https://serpapi.com/search.json', params=params, timeout=(6, 20))
+            resp = requests.get('https://serpapi.com/search.json', params=params, timeout=(8, 20))
             print(f'[*] SerpAPI status={resp.status_code}')
             if resp.status_code != 200:
                 return {
@@ -424,21 +463,6 @@ def ai_detect_thehive():
 # First implementation of ai_detect_faceonlive has been removed to prevent duplicate endpoint errors
 # The updated implementation is at line ~1458
 
-@app.route('/image-source-search', methods=['GET', 'POST'])
-def image_source_search():
-    if request.method == 'GET':
-        return render_template('image_source_search.html')
-    # POST:
-    try:
-        data = request.get_json(silent=True) or {}
-        image_url = data.get('image_url') or request.form.get('image_url')
-        if not image_url:
-            return jsonify({'links': [], 'search_urls': {}, 'error': 'image_url is required', 'success': False}), 200
-        result = scrape_reverse_search(image_url)
-        return jsonify(result), 200
-    except Exception as e:
-        current_app.logger.exception(e)
-        return jsonify({'links': [], 'search_urls': {}, 'error': f'Unhandled: {e}', 'success': False}), 200
 
 @app.route('/api/upload', methods=['POST'])
 def upload_image():
@@ -647,10 +671,226 @@ def api_ai_detection():
                 print(f'[✓] Removed temporary file: {temp_path}')
         except Exception as e:
             print(f'[!] Error removing temporary file: {str(e)}')
+@app.route('/image-source-search', methods=['GET', 'POST'])
+def image_source_search():
+    if request.method == 'GET':
+        return render_template('image_source_search.html')
+    # POST:
+    try:
+        data = request.get_json(silent=True) or {}
+        image_url = data.get('image_url') or request.form.get('image_url')
+        if not image_url:
+            return jsonify({'links': [], 'search_urls': {}, 'error': 'image_url is required', 'success': False}), 200
+        result = scrape_reverse_search(image_url)
+        return jsonify(result), 200
+    except Exception as e:
+        app.logger.exception(e)  # use app.logger instead of current_app
+        return jsonify({'links': [], 'search_urls': {}, 'error': f'Unhandled: {e}', 'success': False}), 200
 
-@app.route('/audio-verification')
-def audio_verification():
-    return render_template('audio_verification.html')
+# Endpoint for Zenserp Direct Search
+@app.route('/api/direct-search', methods=['POST'])
+def direct_search_api():
+    """API endpoint for Direct Search using Zenserp"""
+    try:
+        data = request.get_json(silent=True) or {}
+        query = data.get('query')
+        image_url = data.get('image_url')
+        
+        if not query and not image_url:
+            # Check form data if json is empty
+            query = request.form.get('query')
+            image_url = request.form.get('image_url')
+        
+        if not query and not image_url:
+             # Handle file upload for reverse image search
+            if 'file' in request.files:
+                file = request.files['file']
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(file.filename)
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    
+                    # Upload to ImgBB
+                    with open(filepath, 'rb') as f:
+                        image_data = base64.b64encode(f.read()).decode('utf-8')
+                    image_url = upload_to_imgbb(image_data)
+                    os.remove(filepath) # clean up
+            
+        if not query and not image_url:
+            return jsonify({'error': 'No query or image provided', 'success': False}), 400
+
+        print(f"[*] Starting Zenserp search. Query: {query}, Image: {image_url}")
+        
+        # Zenserp Search Logic
+        headers = {'apikey': ZENSERP_API_KEY}
+        
+        if image_url:
+            # Reverse Image Search - use image_url parameter per Zenserp docs
+            params = {
+                'image_url': image_url,
+                'gl': 'us',              # Keep US for broader search, we will translate
+                'hl': 'en'               # Keep English for better source data
+            }
+            print(f"[*] Zenserp reverse image search params: {params}")
+            resp = requests.get('https://app.zenserp.com/api/v2/search', headers=headers, params=params, timeout=90)
+            
+        else:
+            # Text Search
+            params = {
+                'q': query,
+                'num': 40, # Fetch more initially, then filter
+                'gl': 'sa',
+                'hl': 'ar'
+            }
+            resp = requests.get('https://app.zenserp.com/api/v2/search', headers=headers, params=params, timeout=60)
+
+        print(f"[*] Zenserp response status: {resp.status_code}")
+        
+        if resp.status_code != 200:
+            print(f"[!] Zenserp API Error: {resp.text}")
+            return jsonify({'error': f'Zenserp API Error: {resp.status_code}', 'details': resp.text, 'success': False}), 502
+
+        zenserp_data = resp.json()
+        print(f"[*] Zenserp response keys: {zenserp_data.keys()}")
+        
+        # Initialize translation
+        try:
+            from deep_translator import GoogleTranslator
+            translator = GoogleTranslator(source='auto', target='ar')
+            def translate_text(text):
+                if not text: return text
+                try:
+                    # Don't translate if already looks Arabic (simple heuristic)
+                    if any('\u0600' <= char <= '\u06FF' for char in text[:10]):
+                        return text
+                    return translator.translate(text)
+                except:
+                    return text
+        except ImportError:
+            print("[!] deep_translator not found, skipping translation")
+            def translate_text(text): return text # Fallback if translator not available
+
+        # Process results into a standard timeline format
+        items_to_process = []
+        
+        # Helper to parse Zenserp results (without translation yet)
+        def parse_item(item, source_type='web'):
+            title = item.get('title', 'No Title')
+            link = item.get('url') or item.get('link') or item.get('destination')
+            snippet = item.get('description') or item.get('snippet') or item.get('title')
+            thumbnail = item.get('thumbnail') or item.get('image')
+            
+            # Extract Date
+            date_str = item.get('date') or item.get('snippet_highlighted_words', [None])[0] if isinstance(item.get('snippet_highlighted_words'), list) else None
+            
+            # Helper to extract date from snippet text if date_str is missing
+            if not date_str and snippet:
+                # Basic regex for dates like "Oct 25, 2023" or "2023-10-25"
+                import re
+                date_match = re.search(r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2},? \d{4}\b|\b\d{4}-\d{2}-\d{2}\b', snippet)
+                if date_match:
+                    date_str = date_match.group(0)
+
+            # Try to extract domain
+            domain = 'Web'
+            if link:
+                try:
+                    from urllib.parse import urlparse
+                    domain = urlparse(link).netloc
+                except:
+                    pass
+
+            # Timestamp parsing
+            timestamp = None
+            if date_str:
+                try:
+                    if DATEPARSER_AVAILABLE:
+                         dt = dateparser.parse(date_str)
+                         if dt: timestamp = dt.isoformat()
+                except:
+                    pass
+            
+            return {
+                'title': title,
+                'link': link,
+                'snippet': snippet,
+                'thumbnail': thumbnail,
+                'date_text': date_str,
+                'timestamp': timestamp,
+                'source': domain,
+                'type': source_type
+            }
+
+        # Harvest results from all sections
+        sections_to_check = [
+            ('reverse_image_results', ['organic', 'pages_with_matching_images']),
+            ('organic', None),
+            ('image_results', None)
+        ]
+        
+        for section, subsections in sections_to_check:
+            if section in zenserp_data:
+                data_section = zenserp_data[section]
+                
+                # Handle nested structure (reverse_image_results)
+                if subsections and isinstance(data_section, dict):
+                    for sub in subsections:
+                        if sub in data_section and data_section[sub]:
+                            for item in data_section[sub]:
+                                items_to_process.append(parse_item(item, 'organic'))
+                
+                # Handle list structure (organic, image_results)
+                elif isinstance(data_section, list):
+                     for item in data_section:
+                        items_to_process.append(parse_item(item, 'organic'))
+
+        # Remove duplicates based on link
+        seen_links = set()
+        unique_items = []
+        for item in items_to_process:
+            if item['link'] and item['link'] not in seen_links:
+                seen_links.add(item['link'])
+                unique_items.append(item)
+        
+        # Sort: Oldest first (Ascending)
+        # Items with timestamp appear first, sorted ascending (oldest to newest)
+        # Items without timestamp appear last
+        unique_items.sort(key=lambda x: (x['timestamp'] is None, x['timestamp']))
+        
+        # Limit to top 20 BEFORE translation to save time
+        final_items = unique_items[:20]
+
+        print(f"[*] Translating {len(final_items)} items...")
+
+        # Parallel translation using ThreadPoolExecutor
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            def translate_item(item):
+                if not item['title'] and not item['snippet']:
+                    return item
+                    
+                # Translating title and snippet
+                if item['title']:
+                    item['title'] = translate_text(item['title'])
+                if item['snippet']:
+                    item['snippet'] = translate_text(item['snippet'])
+                return item
+            
+            # Execute translation in parallel
+            timeline = list(executor.map(translate_item, final_items))
+
+        print(f"[*] Total filtered timeline items: {len(timeline)}")
+
+        return jsonify({
+            'success': True,
+            'timeline': timeline,
+            'total': len(timeline),
+            'raw': {} # Don't send raw data to save bandwidth
+        })
+
+    except Exception as e:
+        print(f"[!] Error in Direct Search: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'success': False}), 500
 
 @app.route('/api/image-source-search', methods=['POST'])
 def api_image_source_search():
@@ -710,7 +950,12 @@ def api_image_source_search():
             
     return jsonify({'error': 'نوع الملف غير مدعوم'}), 400
 
+@app.route('/audio-verification')
+def audio_verification():
+    return render_template('audio_verification.html')
+
 @app.route('/verify-audio', methods=['POST'])
+@app.route('/api/verify-audio', methods=['POST'])
 def verify_audio():
     """API endpoint to verify if audio is AI-generated using AIorNot API"""
     try:
@@ -765,7 +1010,7 @@ def verify_audio():
             }), 500
         
         # AIorNot API Key and endpoint
-        API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjVjNDEyZDIxLTQ2MWUtNDc2My05ODVmLWQzZjI2NmY5Y2JlMCIsInVzZXJfaWQiOiI1YzQxMmQyMS00NjFlLTQ3NjMtOTg1Zi1kM2YyNjZmOWNiZTAiLCJhdWQiOiJhY2Nlc3MiLCJleHAiOjAuMH0.w-D35bZii8-wpZZig397pzfHUReAFnBTuKSQBjOI7cA"
+        API_KEY = AIORNOT_API_KEY
         VOICE_ENDPOINT = "https://api.aiornot.com/v1/reports/voice"
         
         # Calculate MD5 hash for the file
@@ -876,7 +1121,7 @@ def ai_detection_page():
 def upload_to_imgbb(image_data):
     """Upload an image to ImgBB and return the URL"""
     # Use the API key that works in the standalone example
-    imgbb_api_key = os.environ.get('IMGBB_API_KEY', '0a85906528efe824b2563d2ae563b68f')
+    imgbb_api_key = os.environ.get('IMGBB_API_KEY')
     
     print(f'[*] Starting ImgBB upload with API key: {imgbb_api_key[:4]}...{imgbb_api_key[-4:]}')
     
@@ -1274,6 +1519,528 @@ def ai_detect_faceonlive():
     finally:
         # File cleanup is now handled inside the scrape_faceonlive function
         pass
+
+@app.route('/provenance')
+def provenance():
+    """Render the provenance page"""
+    return render_template('provenance.html')
+
+@app.route('/api/provenance', methods=['POST'])
+def api_provenance():
+    """API endpoint for provenance analysis (origin & first seen)"""
+    try:
+        data = request.get_json()
+        if not data or not data.get('image_url'):
+            return jsonify({'error': 'image_url required'}), 200
+
+        image_url = data['image_url']
+        print(f'[*] Provenance API called with image_url: {image_url}')
+
+        # Check if required dependencies are available
+        if not BS4_AVAILABLE:
+            return jsonify({
+                'first_seen': None,
+                'timeline': [],
+                'related_images': [],
+                'stats': {'checked': 0, 'with_dates': 0},
+                'note': 'BeautifulSoup4 dependency not available. Please install: pip install beautifulsoup4'
+            }), 200
+
+        # Get SerpAPI key
+        serpapi_key = os.environ.get('SERPAPI_API_KEY', SERPAPI_API_KEY)
+        
+        if not serpapi_key:
+            return jsonify({
+                'first_seen': None,
+                'timeline': [],
+                'related_images': [],
+                'stats': {'checked': 0, 'with_dates': 0},
+                'note': 'SerpAPI key not configured'
+            }), 200
+
+        try:
+            print(f'[*] Calling SerpAPI for reverse image search: {image_url}')
+            
+            # SerpAPI parameters for Google Reverse Image Search
+            params = {
+                'engine': 'google_reverse_image',
+                'image_url': image_url,
+                'api_key': serpapi_key,
+                'hl': 'en',
+                'gl': 'us'
+            }
+            
+            response = requests.get('https://serpapi.com/search.json', params=params, timeout=30)
+            
+            if response.status_code != 200:
+                print(f'[!] SerpAPI error: {response.status_code}')
+                return jsonify({
+                    'first_seen': None,
+                    'timeline': [],
+                    'related_images': [],
+                    'stats': {'checked': 0, 'with_dates': 0},
+                    'note': f'SerpAPI error: {response.status_code}'
+                }), 200
+            
+            serp_data = response.json()
+            print(f'[*] SerpAPI response received')
+            
+            # Check for errors in response
+            if 'error' in serp_data:
+                print(f'[!] SerpAPI error: {serp_data["error"]}')
+                return jsonify({
+                    'first_seen': None,
+                    'timeline': [],
+                    'related_images': [],
+                    'stats': {'checked': 0, 'with_dates': 0},
+                    'note': f'SerpAPI error: {serp_data.get("error")}'
+                }), 200
+
+            # Collect candidate links and related images from SerpAPI response
+            candidate_urls = []
+            related_images = []
+            
+            from urllib.parse import urlparse
+            
+            # Process image results for related images gallery
+            image_results = serp_data.get('image_results', [])
+            print(f'[*] Found {len(image_results)} image results')
+            
+            for img in image_results[:30]:  # Limit to 30 images
+                if isinstance(img, dict):
+                    thumbnail = img.get('thumbnail')
+                    original = img.get('original')
+                    source_url = img.get('source')
+                    link = img.get('link')
+                    position = img.get('position', '')
+                    title = img.get('title', '')
+                    
+                    # Add link to candidate URLs for timeline
+                    if link and link.startswith('http'):
+                        candidate_urls.append(link)
+                    
+                    if thumbnail or original:
+                        # Extract source domain from link (the page URL where image was found)
+                        if link:
+                            try:
+                                parsed = urlparse(link)
+                                source_domain = parsed.netloc or 'مصدر غير معروف'
+                            except:
+                                source_domain = 'مصدر غير معروف'
+                        else:
+                            source_domain = 'مصدر غير معروف'
+                        
+                        related_images.append({
+                            'thumbnail': thumbnail or original,
+                            'original': original or thumbnail,
+                            'link': link or source_url or original,
+                            'source': source_domain,
+                            'title': title
+                        })
+            
+            # Process inline images
+            inline_images = serp_data.get('inline_images', [])
+            print(f'[*] Found {len(inline_images)} inline images')
+            
+            for img in inline_images[:20]:  # Limit to 20
+                if isinstance(img, dict):
+                    thumbnail = img.get('thumbnail')
+                    original = img.get('original')
+                    link = img.get('link')
+                    source_url = img.get('source')
+                    title = img.get('title', '')
+                    
+                    # Add link to candidate URLs for timeline
+                    if link and link.startswith('http'):
+                        candidate_urls.append(link)
+                    
+                    if thumbnail or original:
+                        # Avoid duplicates
+                        if not any(ri['original'] == (original or thumbnail) for ri in related_images):
+                            # Extract source domain
+                            if link:
+                                try:
+                                    parsed = urlparse(link)
+                                    source_domain = parsed.netloc or 'مصدر غير معروف'
+                                except:
+                                    source_domain = 'مصدر غير معروف'
+                            else:
+                                source_domain = 'مصدر غير معروف'
+                            
+                            related_images.append({
+                                'thumbnail': thumbnail or original,
+                                'original': original or thumbnail,
+                                'link': link or source_url or original,
+                                'source': source_domain,
+                                'title': title
+                            })
+            
+            # Get URLs from visual matches and organic results
+            for key in ['visual_matches', 'organic_results']:
+                items = serp_data.get(key, [])
+                print(f'[*] Found {len(items)} {key}')
+                
+                for item in items:
+                    if isinstance(item, dict):
+                        url = item.get('link') or item.get('url')
+                        if url and url.startswith('http'):
+                            candidate_urls.append(url)
+
+            # De-duplicate URLs while preserving order, limit to ~18 URLs
+            seen = set()
+            unique_urls = []
+            for url in candidate_urls:
+                if url not in seen and len(unique_urls) < 18:
+                    seen.add(url)
+                    unique_urls.append(url)
+            
+            print(f'[*] Found {len(candidate_urls)} total URLs, {len(unique_urls)} unique URLs')
+            print(f'[*] Found {len(related_images)} related images')
+            
+            # Limit related images to 24 items
+            related_images = related_images[:24]
+
+            # Process URLs in parallel to extract dates and metadata
+            print(f'[*] Processing {len(unique_urls)} URLs for provenance...')
+            timeline_results = process_urls_for_provenance(unique_urls)
+            print(f'[*] Processed {len(timeline_results)} timeline results')
+
+            # Sort timeline by date (OLDEST FIRST → NEWEST LAST, then undated items)
+            dated_items = [item for item in timeline_results if item.get('published_at')]
+            undated_items = [item for item in timeline_results if not item.get('published_at')]
+
+            # Sort dated items by published_at in ascending order (oldest to newest)
+            dated_items.sort(key=lambda x: x['published_at'] or '9999-12-31T23:59:59Z')
+
+            # Timeline: oldest dated items first, newest dated items last, then undated
+            timeline = dated_items + undated_items
+
+            # First seen = first dated entry
+            first_seen = dated_items[0] if dated_items else None
+
+            # Stats
+            stats = {
+                'checked': len(timeline_results),
+                'with_dates': len(dated_items)
+            }
+
+            return jsonify({
+                'first_seen': first_seen,
+                'timeline': timeline,
+                'related_images': related_images,
+                'stats': stats,
+                'note': None
+            }), 200
+
+        except requests.exceptions.Timeout:
+            print(f'[!] SerpAPI request timeout')
+            return jsonify({
+                'first_seen': None,
+                'timeline': [],
+                'related_images': [],
+                'stats': {'checked': 0, 'with_dates': 0},
+                'note': 'Request timeout. Please try again.'
+            }), 200
+        except Exception as e:
+            print(f'[!] SerpAPI error: {str(e)}')
+            traceback.print_exc()
+            return jsonify({
+                'first_seen': None,
+                'timeline': [],
+                'related_images': [],
+                'stats': {'checked': 0, 'with_dates': 0},
+                'note': f'Error: {str(e)[:200]}'
+            }), 200
+
+    except Exception as e:
+        print(f'[!] Error in provenance API: {str(e)}')
+        traceback.print_exc()
+        return jsonify({
+            'first_seen': None,
+            'timeline': [],
+            'related_images': [],
+            'stats': {'checked': 0, 'with_dates': 0},
+            'note': f'Server error: {str(e)}'
+        }), 200
+
+def process_urls_for_provenance(urls):
+    """Process URLs in parallel to extract dates and metadata"""
+    from urllib.parse import urlparse
+    import re
+    from datetime import datetime
+
+    def extract_page_info(url):
+        """Extract title, date, and metadata from a single URL"""
+        try:
+            # Check if BeautifulSoup is available
+            if not BS4_AVAILABLE:
+                return {
+                    'url': url,
+                    'domain': urlparse(url).netloc,
+                    'title': 'BeautifulSoup not available',
+                    'published_at': None,
+                    'confidence': 0.0,
+                    'evidence': ['missing_dependency:beautifulsoup4']
+                }
+
+            # Set up session with retries
+            session = requests.Session()
+            retry_strategy = Retry(
+                total=2,
+                backoff_factor=0.5,
+                status_forcelist=[429, 500, 502, 503, 504],
+            )
+            adapter = HTTPAdapter(max_retries=retry_strategy)
+            session.mount("http://", adapter)
+            session.mount("https://", adapter)
+
+            # Fetch page with timeout
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+
+            response = session.get(url, headers=headers, timeout=(5, 10))
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, 'html.parser')
+            domain = urlparse(url).netloc
+
+            # Extract title
+            title = ''
+            title_tag = soup.find('title')
+            if title_tag:
+                title = title_tag.get_text().strip()
+
+            # Try og:title as fallback
+            if not title:
+                og_title = soup.find('meta', property='og:title')
+                if og_title:
+                    title = og_title.get('content', '').strip()
+
+            # Fallback to domain if no title
+            if not title:
+                title = domain
+
+            # Extract published date with evidence tracking
+            published_at = None
+            confidence = 0.0
+            evidence = []
+
+            # High confidence sources
+            meta_published = soup.find('meta', property='article:published_time')
+            if meta_published and meta_published.get('content'):
+                date_str = meta_published.get('content')
+                parsed_date = parse_date_string(date_str)
+                if parsed_date:
+                    published_at = parsed_date
+                    confidence = 0.95
+                    evidence.append('meta:article:published_time')
+
+            # Try JSON-LD structured data (very high confidence)
+            if not published_at:
+                json_ld_scripts = soup.find_all('script', type='application/ld+json')
+                for script in json_ld_scripts:
+                    try:
+                        data = json.loads(script.string)
+                        # Handle both single object and array
+                        items = data if isinstance(data, list) else [data]
+                        for item in items:
+                            date_published = item.get('datePublished') or item.get('dateCreated') or item.get('uploadDate')
+                            if date_published:
+                                parsed_date = parse_date_string(date_published)
+                                if parsed_date:
+                                    published_at = parsed_date
+                                    confidence = 0.90
+                                    evidence.append('jsonld:datePublished')
+                                    break
+                        if published_at:
+                            break
+                    except:
+                        continue
+
+            # Medium-high confidence sources
+            if not published_at:
+                selectors = [
+                    ('meta[property="og:published_time"]', 'meta:og:published_time', 0.85),
+                    ('meta[property="article:published"]', 'meta:article:published', 0.85),
+                    ('meta[name="pubdate"]', 'meta:pubdate', 0.80),
+                    ('meta[name="publishdate"]', 'meta:publishdate', 0.80),
+                    ('meta[name="date"]', 'meta:date', 0.75),
+                    ('meta[itemprop="datePublished"]', 'meta:datePublished', 0.80),
+                    ('meta[name="article.published"]', 'meta:article.published', 0.80),
+                    ('time[datetime]', 'time:datetime', 0.75),
+                    ('time[pubdate]', 'time:pubdate', 0.75),
+                    ('[itemprop="datePublished"]', 'itemprop:datePublished', 0.70),
+                ]
+
+                for selector, evidence_name, conf in selectors:
+                    element = soup.select_one(selector)
+                    if element:
+                        date_str = element.get('content') or element.get('datetime') or element.get_text()
+                        if date_str:
+                            parsed_date = parse_date_string(date_str.strip())
+                            if parsed_date:
+                                published_at = parsed_date
+                                confidence = conf
+                                evidence.append(evidence_name)
+                                break
+            
+            # Try to extract from URL path (e.g., /2024/01/15/article)
+            if not published_at:
+                url_date_match = re.search(r'/(\d{4})/(\d{1,2})/(\d{1,2})/', url)
+                if url_date_match:
+                    try:
+                        year, month, day = url_date_match.groups()
+                        date_str = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+                        parsed_date = parse_date_string(date_str)
+                        if parsed_date:
+                            published_at = parsed_date
+                            confidence = 0.65
+                            evidence.append('url:path_date')
+                    except:
+                        pass
+            
+            # Search for date patterns in text
+            if not published_at:
+                text_content = soup.get_text()[:2000]  # First 2000 chars
+                # Look for ISO dates
+                date_patterns = [
+                    r'\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})',
+                    r'\b(\d{4}-\d{2}-\d{2})',
+                    r'\b(\d{1,2}/\d{1,2}/\d{4})',
+                ]
+                for pattern in date_patterns:
+                    match = re.search(pattern, text_content)
+                    if match:
+                        date_str = match.group(1)
+                        parsed_date = parse_date_string(date_str)
+                        if parsed_date:
+                            published_at = parsed_date
+                            confidence = 0.50
+                            evidence.append('text:pattern_match')
+                            break
+
+            return {
+                'url': url,
+                'domain': domain,
+                'title': title[:200],  # Limit title length
+                'published_at': published_at,
+                'confidence': confidence,
+                'evidence': evidence
+            }
+
+        except requests.exceptions.RequestException as e:
+            return {
+                'url': url,
+                'domain': urlparse(url).netloc,
+                'title': f'Error: {str(e)[:50]}',
+                'published_at': None,
+                'confidence': 0.0,
+                'evidence': [f'fetch_error:{str(e)[:30]}']
+            }
+        except Exception as e:
+            return {
+                'url': url,
+                'domain': urlparse(url).netloc,
+                'title': f'Parse error: {str(e)[:50]}',
+                'published_at': None,
+                'confidence': 0.0,
+                'evidence': [f'parse_error:{str(e)[:30]}']
+            }
+
+    # Process URLs in parallel with ThreadPoolExecutor
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+        future_to_url = {executor.submit(extract_page_info, url): url for url in urls}
+        for future in concurrent.futures.as_completed(future_to_url, timeout=60):
+            try:
+                result = future.result(timeout=10)
+                results.append(result)
+            except concurrent.futures.TimeoutError:
+                url = future_to_url[future]
+                results.append({
+                    'url': url,
+                    'domain': urlparse(url).netloc,
+                    'title': 'Timeout error',
+                    'published_at': None,
+                    'confidence': 0.0,
+                    'evidence': ['fetch_error:timeout']
+                })
+            except Exception as e:
+                url = future_to_url[future]
+                results.append({
+                    'url': url,
+                    'domain': urlparse(url).netloc,
+                    'title': f'Error: {str(e)[:50]}',
+                    'published_at': None,
+                    'confidence': 0.0,
+                    'evidence': [f'fetch_error:{str(e)[:30]}']
+                })
+
+    return results
+
+def parse_date_string(date_str):
+    """Parse date string and return ISO 8601 UTC format"""
+    try:
+        if not date_str:
+            return None
+        
+        # Clean the date string
+        date_str = str(date_str).strip()
+
+        # Try dateparser first if available
+        if DATEPARSER_AVAILABLE:
+            parsed = dateparser.parse(date_str)
+            if parsed:
+                # Convert to UTC and return ISO format
+                utc_dt = parsed.replace(tzinfo=None) if parsed.tzinfo is None else parsed.astimezone().replace(tzinfo=None)
+                return utc_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        # Fallback to basic datetime parsing with more formats
+        from datetime import datetime
+        formats = [
+            # ISO formats
+            '%Y-%m-%dT%H:%M:%SZ',
+            '%Y-%m-%dT%H:%M:%S%z',
+            '%Y-%m-%dT%H:%M:%S',
+            '%Y-%m-%d %H:%M:%S',
+            '%Y-%m-%d',
+            # Common formats
+            '%d %B %Y',  # 15 January 2024
+            '%B %d, %Y',  # January 15, 2024
+            '%d %b %Y',  # 15 Jan 2024
+            '%b %d, %Y',  # Jan 15, 2024
+            # Slash formats
+            '%m/%d/%Y',
+            '%d/%m/%Y',
+            '%Y/%m/%d',
+            # Dash formats
+            '%d-%m-%Y',
+            '%m-%d-%Y',
+            # Others
+            '%Y%m%d',
+        ]
+
+        for fmt in formats:
+            try:
+                dt = datetime.strptime(date_str[:50], fmt)  # Limit to first 50 chars
+                return dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+            except ValueError:
+                continue
+        
+        # Try to extract just year-month-day if format is complex
+        import re
+        simple_date = re.search(r'(\d{4})-(\d{2})-(\d{2})', date_str)
+        if simple_date:
+            try:
+                dt = datetime.strptime(simple_date.group(0), '%Y-%m-%d')
+                return dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+            except:
+                pass
+
+        return None
+    except Exception:
+        return None
 
 if __name__ == '__main__':
     # تشغيل التطبيق على جميع الواجهات (0.0.0.0) بدلاً من localhost فقط

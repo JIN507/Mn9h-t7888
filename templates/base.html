@@ -90,8 +90,8 @@
         }
         
         .dropdown-item:hover {
-            background-color: rgba(67, 56, 202, 0.1);
-            transform: translateX(-5px);
+            background: rgba(255,255,255,0.2) !important;
+            transform: translateX(5px);
         }
         
         footer {
@@ -161,32 +161,82 @@
             <div class="collapse navbar-collapse" id="navbarMain">
                 <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle text-white" href="#" id="searchDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="fas fa-search me-1"></i>   مصدر الصور
+                        <a class="nav-link dropdown-toggle text-white" href="#" id="imagesDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-images me-1"></i> الصور
                         </a>
-                        <ul class="dropdown-menu" aria-labelledby="searchDropdown">
-                            <li><a class="dropdown-item" href="/"><i class="fas fa-hand-point-left me-1"></i> البحث اليدوي عن مصدر الصورة</a></li>
-                            <li><a class="dropdown-item" href="/image-source-search"><i class="fas fa-bolt me-1"></i> البحث المباشر عن مصدر الصورة</a></li>
+                        <ul class="dropdown-menu shadow-lg border-0" aria-labelledby="imagesDropdown" style="min-width: 280px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                            <li class="dropdown-header text-white fw-bold" style="background: rgba(255,255,255,0.1); border-radius: 8px; margin: 8px;">
+                                <i class="fas fa-search me-2"></i>أدوات البحث والتحليل
+                            </li>
+                            <li><hr class="dropdown-divider" style="border-color: rgba(255,255,255,0.2);"></li>
+                            <li>
+                                <a class="dropdown-item py-2 text-white" href="/" style="background: rgba(255,255,255,0.1); margin: 4px 8px; border-radius: 6px; transition: all 0.3s;">
+                                    <div class="d-flex align-items-center">
+                                        <div class="me-3">
+                                            <i class="fas fa-search" style="width: 20px; color: #4fc3f7;"></i>
+                                        </div>
+                                        <div>
+                                            <div class="fw-semibold">البحث العكسي</div>
+                                            <small style="color: rgba(255,255,255,0.8);">البحث عن مصدر الصورة</small>
+                                        </div>
+                                    </div>
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item py-2 text-white" href="/ai-detection" style="background: rgba(255,255,255,0.1); margin: 4px 8px; border-radius: 6px; transition: all 0.3s;">
+                                    <div class="d-flex align-items-center">
+                                        <div class="me-3">
+                                            <i class="fas fa-robot" style="width: 20px; color: #66bb6a;"></i>
+                                        </div>
+                                        <div>
+                                            <div class="fw-semibold">كشف الصور</div>
+                                            <small style="color: rgba(255,255,255,0.8);">اكتشاف الصور المولدة بالذكاء الاصطناعي</small>
+                                        </div>
+                                    </div>
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item py-2 text-white" href="/provenance" style="background: rgba(255,255,255,0.1); margin: 4px 8px; border-radius: 6px; transition: all 0.3s;">
+                                    <div class="d-flex align-items-center">
+                                        <div class="me-3">
+                                            <i class="fas fa-history" style="width: 20px; color: #ffb74d;"></i>
+                                        </div>
+                                        <div>
+                                            <div class="fw-semibold">أصل المحتوى</div>
+                                            <small style="color: rgba(255,255,255,0.8);">تتبع أول ظهور للصورة</small>
+                                        </div>
+                                    </div>
+                                </a>
+                            </li>
+                            <li><hr class="dropdown-divider" style="border-color: rgba(255,255,255,0.2);"></li>
+                            <li style="display: none;">
+                                <a class="dropdown-item py-2 text-white" href="/image-source-search" style="background: rgba(255,255,255,0.1); margin: 4px 8px; border-radius: 6px; transition: all 0.3s;">
+                                    <div class="d-flex align-items-center">
+                                        <div class="me-3">
+                                            <i class="fas fa-bolt" style="width: 20px; color: #ff7043;"></i>
+                                        </div>
+                                        <div>
+                                            <div class="fw-semibold">البحث المباشر</div>
+                                            <small style="color: rgba(255,255,255,0.8);">البحث المباشر عن مصدر الصورة</small>
+                                        </div>
+                                    </div>
+                                </a>
+                            </li>
                         </ul>
                     </li>
                     <li class="nav-item">
                         <a href="/video" class="nav-link text-white">
-                            <i class="fas fa-video me-1"></i>  مصدر الفيديو
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="https://majednews.netlify.app/" class="nav-link text-white">
-                            <i class="fas fa-newspaper me-1"></i> التحقق من الأخبار
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="/ai-detection" class="nav-link text-white">
-                            <i class="fas fa-robot me-1"></i> كشف الصور
+                            <i class="fas fa-video me-1"></i> مصدر الفيديو
                         </a>
                     </li>
                     <li class="nav-item">
                         <a href="/audio-verification" class="nav-link text-white">
                             <i class="fas fa-microphone me-1"></i> كشف الصوت
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="https://majednews.netlify.app/" class="nav-link text-white">
+                            <i class="fas fa-newspaper me-1"></i> التحقق من الأخبار
                         </a>
                     </li>
                 </ul>

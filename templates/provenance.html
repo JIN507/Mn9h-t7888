@@ -1,0 +1,667 @@
+{% extends 'base.html' %}
+
+{% block title %}أصل المحتوى & أول ظهور{% endblock %}
+
+{% block head %}
+<style>
+    .rtl {
+        direction: rtl;
+        text-align: right;
+    }
+    
+    .fade-in {
+        opacity: 0;
+        animation: fadeIn 0.5s ease-out forwards;
+    }
+    
+    @keyframes fadeIn {
+        to { opacity: 1; }
+    }
+    
+    .file-drop-area {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        padding: 2rem 1.5rem;
+        border: 2px dashed #2563eb;
+        border-radius: 0.5rem;
+        transition: 0.2s;
+        background-color: #f8f9fa;
+        flex-direction: column;
+        cursor: pointer;
+        direction: rtl;
+        text-align: center;
+    }
+    
+    .file-drop-area.is-active {
+        background-color: rgba(37, 99, 235, 0.05);
+        border-color: #1d4ed8;
+    }
+    
+    .file-msg {
+        font-size: 1.1rem;
+        font-weight: 500;
+        color: #2563eb;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .file-msg i {
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+        color: #2563eb;
+    }
+    
+    .file-input {
+        position: absolute;
+        left: 0;
+        top: 0;
+        height: 100%;
+        width: 100%;
+        cursor: pointer;
+        opacity: 0;
+    }
+    
+    .image-preview-container {
+        position: relative;
+        text-align: center;
+    }
+    
+    .remove-file-btn {
+        position: absolute;
+        top: 0.5rem;
+        left: 0.5rem;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.875rem;
+        z-index: 2;
+    }
+    
+    .image-preview-container img {
+        max-height: 300px;
+        width: auto;
+        border-radius: 0.5rem;
+        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    }
+    
+    .timeline-item {
+        border-right: 3px solid #2563eb;
+        padding-right: 1rem;
+        margin-bottom: 1rem;
+        position: relative;
+        direction: rtl;
+    }
+    
+    .timeline-item::before {
+        content: '';
+        position: absolute;
+        right: -6px;
+        top: 0.5rem;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background-color: #2563eb;
+    }
+    
+    .timeline-item.undated {
+        border-right-color: #6b7280;
+    }
+    
+    .timeline-item.undated::before {
+        background-color: #6b7280;
+    }
+    
+    .confidence-badge {
+        font-size: 0.75rem;
+    }
+    
+    .tech-details {
+        background-color: #f8f9fa;
+        border: 1px solid #e9ecef;
+        border-radius: 0.375rem;
+        font-family: 'Courier New', monospace;
+        font-size: 0.875rem;
+        max-height: 300px;
+        overflow-y: auto;
+        direction: ltr;
+        text-align: left;
+    }
+    
+    .related-images-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+    
+    .related-image-item {
+        position: relative;
+        border-radius: 0.5rem;
+        overflow: hidden;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        cursor: pointer;
+    }
+    
+    .related-image-item:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+    
+    .related-image-item img {
+        width: 100%;
+        height: 120px;
+        object-fit: cover;
+    }
+    
+    .related-image-overlay {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+        color: white;
+        padding: 0.5rem;
+        font-size: 0.75rem;
+        text-align: center;
+    }
+    
+    .loading-skeleton {
+        background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+        background-size: 200% 100%;
+        animation: loading 1.5s infinite;
+    }
+    
+    @keyframes loading {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center rtl">
+    <div class="col-lg-8">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white text-center">
+                <h3 class="card-title mb-0">
+                    <i class="fas fa-history me-2"></i>
+                    أصل المحتوى & أول ظهور
+                </h3>
+                <p class="mb-0 mt-2 opacity-75">اكتشف المصدر الأصلي وأول ظهور للصورة</p>
+            </div>
+            <div class="card-body">
+                <form id="provenanceForm">
+                    <div class="mb-4">
+                        <label for="image_url" class="form-label">رابط الصورة</label>
+                        <input type="url" class="form-control" id="image_url" name="image_url" 
+                               placeholder="https://example.com/image.jpg" dir="ltr">
+                        <div class="form-text">أدخل رابط الصورة المراد تحليلها</div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="form-label">أو ارفع صورة</label>
+                        <div class="file-drop-area" id="fileDropArea">
+                            <input type="file" class="file-input" id="imageFile" accept="image/*">
+                            <div class="file-msg">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <span>اسحب الصورة هنا أو انقر للاختيار</span>
+                                <small class="text-muted mt-1">PNG, JPG, GIF حتى 10MB</small>
+                            </div>
+                        </div>
+                        <div id="imagePreview" class="mt-3" style="display: none;">
+                            <div class="image-preview-container text-center">
+                                <button type="button" class="btn btn-sm btn-danger remove-file-btn" id="removeFile">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                                <img id="previewImg" src="" alt="معاينة" class="img-fluid" style="max-height: 300px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                                <div class="mt-2">
+                                    <small class="text-muted">الصورة جاهزة للتحليل</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary btn-lg w-100" id="analyzeBtn">
+                        <i class="fas fa-search me-2"></i>
+                        تحليل
+                    </button>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Loading indicator -->
+        <div id="loadingIndicator" class="text-center my-4" style="display: none;">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">جاري التحليل...</span>
+            </div>
+            <p class="mt-2 text-muted">جاري البحث عن مصدر الصورة...</p>
+        </div>
+        
+        <!-- Error alert -->
+        <div id="errorAlert" class="alert alert-danger mt-4" style="display: none;" role="alert">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <span id="errorMessage"></span>
+        </div>
+        
+        <!-- Results card -->
+        <div id="prov-card" class="card shadow-sm mt-4 fade-in" style="display: none;">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">
+                    <i class="fas fa-chart-line me-2"></i>
+                    نتائج التحليل
+                </h4>
+                <span id="prov-stats" class="badge bg-secondary"></span>
+            </div>
+            <div class="card-body">
+                <!-- First Seen Summary -->
+                <div id="prov-first" class="mb-4" style="display: none;">
+                    <h5 class="text-primary mb-3">
+                        <i class="fas fa-star me-2"></i>
+                        أول ظهور
+                    </h5>
+                    <div class="card bg-light">
+                        <div class="card-body">
+                            <div class="row align-items-center">
+                                <div class="col-md-8">
+                                    <h6 class="card-title mb-1" id="first-title"></h6>
+                                    <p class="card-text">
+                                        <small class="text-muted">
+                                            <i class="fas fa-globe me-1"></i>
+                                            <span id="first-domain"></span>
+                                        </small>
+                                    </p>
+                                    <p class="card-text">
+                                        <small class="text-muted">
+                                            <i class="fas fa-calendar me-1"></i>
+                                            <span id="first-date"></span>
+                                        </small>
+                                    </p>
+                                </div>
+                                <div class="col-md-4 text-start">
+                                    <span id="first-confidence" class="badge bg-success confidence-badge mb-2"></span>
+                                    <br>
+                                    <a id="first-link" href="#" target="_blank" class="btn btn-sm btn-outline-primary">
+                                        <i class="fas fa-external-link-alt me-1"></i>
+                                        فتح الرابط
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Timeline -->
+                <div class="mb-4">
+                    <h5 class="text-primary mb-3">
+                        <i class="fas fa-clock me-2"></i>
+                        الجدول الزمني
+                    </h5>
+                    <div id="prov-timeline"></div>
+                </div>
+                
+                <!-- Related Images Gallery -->
+                <div id="prov-related-section" class="mb-4" style="display: none;">
+                    <h5 class="text-primary mb-3">
+                        <i class="fas fa-images me-2"></i>
+                        صور مشابهة
+                    </h5>
+                    <div id="prov-related" class="related-images-grid"></div>
+                </div>
+                
+                <!-- Technical Details Toggle -->
+                <div class="mb-3">
+                    <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" 
+                            data-bs-target="#techDetails" aria-expanded="false">
+                        <i class="fas fa-code me-1"></i>
+                        التفاصيل التقنية
+                    </button>
+                </div>
+                <div class="collapse" id="techDetails">
+                    <pre id="rawJson" class="tech-details p-3"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('provenanceForm');
+    const fileDropArea = document.getElementById('fileDropArea');
+    const fileInput = document.getElementById('imageFile');
+    const imagePreview = document.getElementById('imagePreview');
+    const previewImg = document.getElementById('previewImg');
+    const removeFileBtn = document.getElementById('removeFile');
+    const loadingIndicator = document.getElementById('loadingIndicator');
+    const errorAlert = document.getElementById('errorAlert');
+    const errorMessage = document.getElementById('errorMessage');
+    const provCard = document.getElementById('prov-card');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    
+    // Make drop area clickable
+    fileDropArea.addEventListener('click', function() {
+        fileInput.click();
+    });
+    
+    // Check for pending provenance image from video frame
+    const pendingProvenanceData = localStorage.getItem('pendingProvenance');
+    if (pendingProvenanceData) {
+        console.log('Found pending provenance image from video frame');
+        
+        // Set the preview image
+        previewImg.src = pendingProvenanceData;
+        imagePreview.style.display = 'block';
+        fileDropArea.style.display = 'none';
+        
+        // Store the image data for form submission
+        window.uploadedImageData = pendingProvenanceData;
+        
+        // Clear the localStorage
+        localStorage.removeItem('pendingProvenance');
+        
+        // Auto-submit the form after a short delay
+        setTimeout(() => {
+            console.log('Auto-submitting provenance form...');
+            form.dispatchEvent(new Event('submit'));
+        }, 500);
+    }
+    
+    // Add debugging for form submission
+    console.log('Provenance form elements:', {
+        form: !!form,
+        analyzeBtn: !!analyzeBtn,
+        imageUrl: document.getElementById('image_url'),
+        imageFile: document.getElementById('imageFile')
+    });
+    
+    // File drop area functionality
+    fileDropArea.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        fileDropArea.classList.add('is-active');
+    });
+    
+    fileDropArea.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        fileDropArea.classList.remove('is-active');
+    });
+    
+    fileDropArea.addEventListener('drop', function(e) {
+        e.preventDefault();
+        fileDropArea.classList.remove('is-active');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            handleFileSelect(files[0]);
+        }
+    });
+    
+    fileInput.addEventListener('change', function(e) {
+        if (e.target.files.length > 0) {
+            handleFileSelect(e.target.files[0]);
+        }
+    });
+    
+    removeFileBtn.addEventListener('click', function() {
+        fileInput.value = '';
+        imagePreview.style.display = 'none';
+        fileDropArea.style.display = 'block';
+        // Clear uploaded image data
+        window.uploadedImageData = null;
+        const imageUrlInput = document.getElementById('image_url');
+        if (imageUrlInput) {
+            imageUrlInput.value = '';
+        }
+        // Hide results card
+        provCard.style.display = 'none';
+    });
+    
+    function handleFileSelect(file) {
+        if (file && file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                previewImg.src = e.target.result;
+                imagePreview.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+    }
+    
+    // Form submission
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideError();
+        
+        const imageUrl = document.getElementById('image_url').value.trim();
+        const imageFile = document.getElementById('imageFile').files[0];
+        
+        // Check for uploaded image data from video frame
+        let finalImageUrl = imageUrl;
+        if (window.uploadedImageData) {
+            console.log('Using pre-loaded image data from video frame');
+            finalImageUrl = window.uploadedImageData;
+        } else if (!imageUrl && !imageFile) {
+            showError('الرجاء إدخال رابط الصورة أو رفع ملف');
+            return;
+        }
+        
+        showLoading();
+        
+        try {
+            // If we have image data (base64), upload it first to get a URL
+            if (window.uploadedImageData && window.uploadedImageData.startsWith('data:image')) {
+                console.log('Uploading base64 image data to get URL...');
+                // Convert base64 to blob and upload
+                const blob = await fetch(window.uploadedImageData).then(r => r.blob());
+                const formData = new FormData();
+                formData.append('file', blob, 'frame.png');
+                
+                const uploadResp = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const uploadResult = await uploadResp.json();
+                if (uploadResult.error) {
+                    throw new Error(uploadResult.error);
+                }
+                
+                finalImageUrl = uploadResult.imageUrl;
+                console.log('Image uploaded, URL:', finalImageUrl);
+            } else if (imageFile && !window.uploadedImageData) {
+                // If file is selected, upload it first
+                finalImageUrl = await uploadImage(imageFile);
+            }
+            
+            // Call provenance API
+            console.log('Calling provenance API with URL:', finalImageUrl);
+            const response = await fetch('/api/provenance', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    image_url: finalImageUrl
+                })
+            });
+            
+            const result = await response.json();
+            hideLoading();
+            
+            if (result.error) {
+                showError(result.error);
+                return;
+            }
+            
+            displayResults(result);
+            
+        } catch (error) {
+            hideLoading();
+            showError('تعذّر جلب بيانات الأصل. حاول لاحقًا.');
+            console.error('Error:', error);
+        }
+    });
+    
+    async function uploadImage(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        if (result.error) {
+            throw new Error(result.error);
+        }
+        
+        return result.imageUrl;
+    }
+    
+    function showLoading() {
+        loadingIndicator.style.display = 'block';
+        analyzeBtn.disabled = true;
+        provCard.style.display = 'none';
+    }
+    
+    function hideLoading() {
+        loadingIndicator.style.display = 'none';
+        analyzeBtn.disabled = false;
+    }
+    
+    function showError(message) {
+        errorMessage.textContent = message;
+        errorAlert.style.display = 'block';
+    }
+    
+    function hideError() {
+        errorAlert.style.display = 'none';
+    }
+    
+    function displayResults(data) {
+        // Update stats in Arabic
+        const stats = data.stats || {};
+        document.getElementById('prov-stats').textContent = 
+            `روابط مفحوصة: ${stats.checked || 0} • بها تاريخ: ${stats.with_dates || 0}`;
+        
+        // Display first seen if available
+        const firstSeen = data.first_seen;
+        const firstSeenDiv = document.getElementById('prov-first');
+        
+        if (firstSeen && firstSeen.published_at) {
+            document.getElementById('first-title').textContent = firstSeen.title || 'لا يوجد عنوان';
+            document.getElementById('first-domain').textContent = firstSeen.domain || '';
+            document.getElementById('first-date').textContent = 
+                new Date(firstSeen.published_at).toLocaleString('ar-SA');
+            document.getElementById('first-confidence').textContent = 
+                `${Math.round((firstSeen.confidence || 0) * 100)}% ثقة`;
+            document.getElementById('first-link').href = firstSeen.url || '#';
+            firstSeenDiv.style.display = 'block';
+        } else {
+            firstSeenDiv.style.display = 'none';
+        }
+        
+        // Display timeline (sorted from oldest to newest)
+        const timeline = data.timeline || [];
+        const timelineDiv = document.getElementById('prov-timeline');
+        timelineDiv.innerHTML = '';
+        
+        if (timeline.length === 0) {
+            timelineDiv.innerHTML = '<p class="text-muted">لم يتم العثور على نتائج في الجدول الزمني</p>';
+        } else {
+            // Add timeline header
+            if (timeline.some(item => item.published_at)) {
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'text-muted small mb-3 text-center';
+                headerDiv.innerHTML = '<i class="fas fa-arrow-down me-1"></i> من الأقدم إلى الأحدث <i class="fas fa-arrow-down ms-1"></i>';
+                timelineDiv.appendChild(headerDiv);
+            }
+            
+            timeline.forEach((item, index) => {
+                const timelineItem = document.createElement('div');
+                timelineItem.className = `timeline-item ${item.published_at ? 'dated' : 'undated'}`;
+                
+                const confidenceBadge = item.confidence > 0 ? 
+                    `<span class="badge bg-info confidence-badge">${Math.round(item.confidence * 100)}% ثقة</span>` : '';
+                
+                // Add position badge for dated items
+                const positionBadge = item.published_at ? 
+                    `<span class="badge bg-success me-1" style="font-size: 0.7rem;">رقم ${index + 1}</span>` : '';
+                
+                const dateBadge = item.published_at ? 
+                    `<span class="badge bg-primary me-2">مؤرّخ</span>` : 
+                    `<span class="badge bg-secondary me-2">غير مؤرّخ</span>`;
+                
+                const dateText = item.published_at ? 
+                    new Date(item.published_at).toLocaleString('ar-SA') : 
+                    'تاريخ غير محدد';
+                
+                timelineItem.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            ${positionBadge}
+                            ${dateBadge}
+                            <strong>${item.domain || 'مجهول'}</strong>
+                            ${confidenceBadge}
+                        </div>
+                        <small class="text-muted">${dateText}</small>
+                    </div>
+                    <h6 class="mb-2">${item.title || 'لا يوجد عنوان'}</h6>
+                    <a href="${item.url || '#'}" target="_blank" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-external-link-alt me-1"></i>
+                        زيارة الصفحة
+                    </a>
+                `;
+                
+                timelineDiv.appendChild(timelineItem);
+            });
+        }
+        
+        // Display related images gallery
+        const relatedImages = data.related_images || [];
+        const relatedSection = document.getElementById('prov-related-section');
+        const relatedGrid = document.getElementById('prov-related');
+        
+        if (relatedImages.length > 0) {
+            relatedGrid.innerHTML = '';
+            relatedImages.forEach(img => {
+                const imageItem = document.createElement('div');
+                imageItem.className = 'related-image-item';
+                imageItem.innerHTML = `
+                    <img src="${img.thumbnail || img.original}" alt="صورة مشابهة" loading="lazy">
+                    <div class="related-image-overlay">
+                        ${img.source || 'مصدر غير معروف'}
+                    </div>
+                `;
+                imageItem.addEventListener('click', () => {
+                    window.open(img.link || img.original, '_blank');
+                });
+                relatedGrid.appendChild(imageItem);
+            });
+            relatedSection.style.display = 'block';
+        } else {
+            relatedSection.style.display = 'none';
+        }
+        
+        // Display technical details
+        document.getElementById('rawJson').textContent = JSON.stringify(data, null, 2);
+        
+        // Show note if available
+        if (data.note) {
+            const noteDiv = document.createElement('div');
+            noteDiv.className = 'alert alert-info mt-3';
+            noteDiv.innerHTML = `<i class="fas fa-info-circle me-2"></i>${data.note}`;
+            timelineDiv.appendChild(noteDiv);
+        }
+        
+        // Show results card with fade-in animation
+        provCard.style.display = 'block';
+        setTimeout(() => {
+            provCard.classList.add('fade-in');
+            provCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+    }
+});
+</script>
+{% endblock %}

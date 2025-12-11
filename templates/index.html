@@ -107,6 +107,33 @@
         
         let searchResults = null;
         
+        // Check for pending reverse search image from video frame
+        const pendingReverseSearchData = localStorage.getItem('pendingReverseSearch');
+        const uploadedImageData = localStorage.getItem('uploadedImage');
+        
+        if (pendingReverseSearchData || uploadedImageData) {
+            console.log('Found pending reverse search image from video frame');
+            const imageData = pendingReverseSearchData || uploadedImageData;
+            
+            // Set the preview image
+            imagePreview.src = imageData;
+            previewContainer.classList.remove('d-none');
+            dropArea.classList.add('d-none');
+            
+            // Store the image data for form submission
+            window.uploadedImageData = imageData;
+            
+            // Clear the localStorage
+            localStorage.removeItem('pendingReverseSearch');
+            localStorage.removeItem('uploadedImage');
+            
+            // Auto-submit the form after a short delay
+            setTimeout(() => {
+                console.log('Auto-submitting reverse search form...');
+                uploadForm.dispatchEvent(new Event('submit'));
+            }, 500);
+        }
+        
         // Handle file selection via button
         selectFileBtn.addEventListener('click', () => {
             fileInput.click();
@@ -136,34 +163,63 @@
             previewContainer.classList.add('d-none');
             dropArea.classList.remove('d-none');
             resultsContainer.classList.add('d-none');
+            // Clear uploaded image data
+            window.uploadedImageData = null;
         });
         
         // Handle form submission
         uploadForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            if (!fileInput.files[0]) {
-                alert('u0627u0644u0631u062cu0627u0621 u0627u062eu062au064au0627u0631 u0635u0648u0631u0629 u0623u0648u0644u0627u064b');
+            
+            // Check if we have a file or uploaded image data from video
+            if (!fileInput.files[0] && !window.uploadedImageData) {
+                alert('الرجاء اختيار صورة أولاً');
                 return;
             }
+            
+            console.log('Starting image upload...');
+            console.log('File input has files:', !!fileInput.files[0]);
+            console.log('Window uploaded image data:', !!window.uploadedImageData);
             
             // Show loading indicator
             loadingIndicator.classList.remove('d-none');
             searchBtn.disabled = true;
             
             try {
-                const formData = new FormData();
-                formData.append('file', fileInput.files[0]);
+                let response;
                 
-                const response = await fetch('/api/upload', {
-                    method: 'POST',
-                    body: formData
-                });
+                if (window.uploadedImageData) {
+                    console.log('Using video frame image data');
+                    // Use the image data from video frame
+                    response = await fetch('/api/upload', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: `image=${encodeURIComponent(window.uploadedImageData)}`
+                    });
+                } else {
+                    console.log('Using uploaded file:', fileInput.files[0].name);
+                    // Use the uploaded file
+                    const formData = new FormData();
+                    formData.append('file', fileInput.files[0]);
+                    
+                    response = await fetch('/api/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                }
+                
+                console.log('Response status:', response.status);
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    const errorText = await response.text();
+                    console.error('Server error response:', errorText);
+                    throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
                 }
                 
                 const data = await response.json();
+                console.log('Upload response data:', data);
                 searchResults = data;
                 
                 // Handle the response with new function
@@ -174,8 +230,8 @@
                 resultsContainer.classList.remove('d-none');
                 searchBtn.disabled = false;
             } catch (error) {
-                console.error('Error:', error);
-                alert(`u062du062fu062b u062eu0637u0623: ${error.message}`);
+                console.error('Upload error:', error);
+                alert(`حدث خطأ: ${error.message}`);
                 loadingIndicator.classList.add('d-none');
                 searchBtn.disabled = false;
             }

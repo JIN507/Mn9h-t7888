@@ -1,0 +1,428 @@
+{
+  "query": {
+    "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/300px-PNG_transparency_demonstration_1.png",
+    "gl": "us",
+    "hl": "en",
+    "url": "https://lens.google.com/uploadbyurl?url=https%3A%2F%2Fupload.wikimedia.org%2Fwikipedia%2Fcommons%2Fthumb%2F4%2F47%2FPNG_transparency_demonstration_1.png%2F300px-PNG_transparency_demonstration_1.png&hl=en&gl=US&sourceid=chrome&ie=UTF-8"
+  },
+  "reverse_image_results": {
+    "organic": [
+      {
+        "title": "PNG - Wikipedia",
+        "url": "https://en.wikipedia.org/wiki/PNG",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "WEBP",
+        "url": "https://manifold.net/doc/mfd9/webp.htm",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "File:PNG transparency demonstration 2.png - Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:PNG_transparency_demonstration_2.png",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "DELETE IMAGE NODEJS \"NOT FOUND\" – Cloudinary Support",
+        "url": "https://support.cloudinary.com/hc/en-us/community/posts/360007091779-DELETE-IMAGE-NODEJS-NOT-FOUND",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "python - Pillow's save method ignores info parameters ...",
+        "url": "https://stackoverflow.com/questions/71543170/pillows-save-method-ignores-info-parameters",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "ridebmxrus (9evgeny9) · GitHub",
+        "url": "https://github.com/ridebmxrus",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "sonny의 작은집_since 2005]",
+        "url": "https://ymister.cafe24.com/textcube/tag/%EA%B7%B8%EB%A6%BC%ED%8C%90",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Bug in select range feature - Hex Editing - 010 Editor Forum",
+        "url": "https://forum.sweetscape.com/t/bug-in-select-range-feature/243",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "COMENTARIO CRÍTICO DE UN TEXTO EXPOSITIVO - YouTube",
+        "url": "https://www.youtube.com/watch?v=NwyJD1_pZcI",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Jarred Maliwat | Flickr",
+        "url": "https://www.flickr.com/photos/146770454@N06/",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "PNG 3.0 Becomes W3C Standard: Brings HDR, Native APNG & EXIF ...",
+        "url": "https://securityonline.info/png-3-0-becomes-w3c-standard-brings-hdr-native-apng-exif-support-to-the-web/",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Question] How to use url for sg.Image() · Issue #6063 ...",
+        "url": "https://github.com/PySimpleGUI/PySimpleGUI/issues/6063",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Red Dice\" Images – Browse 2,255 Stock Photos, Vectors, and ...",
+        "url": "https://stock.adobe.com/search?k=%22red+dice%22",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "probability | plus.maths.org",
+        "url": "https://plus.maths.org/content/tags/probability?page=1",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Colors Roll Sticker - Colors Roll The - Discover & Share GIFs",
+        "url": "https://tenor.com/view/colors-roll-the-dice-gif-26243802",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "পাশা খেলা Photos, Images for Download Free (page 5 ...",
+        "url": "https://en.photo-ac.com/search/%E0%A6%AA%E0%A6%BE%E0%A6%B6%E0%A6%BE%20%E0%A6%96%E0%A7%87%E0%A6%B2%E0%A6%BE?per_page=100&page=5&orderBy=recent_popular&color=all&modelCount=-2&shape=all&is_tag=true",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Stream Douglas Street w/ Douglas Street feat. Alina & Yoga ...",
+        "url": "https://soundcloud.com/nomadradiofm/douglas-street-w-douglas-street-feat-alina-yoga-mirror-041222",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Blue Rolling Dice Stock Photo - Download Image Now - Dice ...",
+        "url": "https://www.istockphoto.com/photo/blue-rolling-dice-gm866721184-144161117",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "File:Dices.png - Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:Dices.png",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "python - Using openCV to overlay/blend transparent image ...",
+        "url": "https://stackoverflow.com/questions/40895785/using-opencv-to-overlay-blend-transparent-image-onto-another-image",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Cattywampus, Taradiddle, and More Funny-Sounding Words ...",
+        "url": "https://www.merriam-webster.com/wordplay/top-10-funny-sounding-and-interesting-words",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "CodaLab - Competition",
+        "url": "https://codalab.lisn.upsaclay.fr/competitions/8293",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Opaque Red 6-Sided Dice (d6) For Sale | Dice Game Depot",
+        "url": "https://www.dicegamedepot.com/opaque-dice-red-d6/",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Diceware - Wikipedia",
+        "url": "https://en.wikipedia.org/wiki/Diceware",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "AWS CloudFront】WEBページアクセスを高速化 #S3 - Qiita",
+        "url": "https://qiita.com/OPySPGcLYpJE0Tc/items/abe60540ad5870054a2a",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Group Of Dice Stock Photo - Download Image Now - Blue, Color ...",
+        "url": "https://www.istockphoto.com/photo/group-of-dice-gm453487263-30170298",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Present | PDF",
+        "url": "https://www.scribd.com/document/899770850/present",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "cece<3 (@c_stojek34) | Snapchat Stories, Spotlight & Lenses",
+        "url": "https://www.snapchat.com/@c_stojek34",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "WebP Viewer: simple WebP viewer for macOS",
+        "url": "https://langui.net/webp-viewer/",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Games Products Near Me - Delivery or Pickup | Instacart",
+        "url": "https://www.instacart.com/categories/5059-toys-and-games/5060-games",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Why Probability Probably Doesn't Exist (but It's Useful to ...",
+        "url": "https://www.scientificamerican.com/article/why-probability-probably-doesnt-exist-but-its-useful-to-act-like-it-does/",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "2,705 Single Dice Stock Photos, High-Res Pictures, and ...",
+        "url": "https://www.gettyimages.com/photos/single-dice",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Dices | Random's Nextbots Wiki | Fandom",
+        "url": "https://randoms-nextbots.fandom.com/wiki/Dices",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Random number generation - Wikipedia",
+        "url": "https://en.wikipedia.org/wiki/Random_number_generation",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Dice PNG, Dice Transparent Background - FreeIconsPNG",
+        "url": "https://www.freeiconspng.com/images/dice-png",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Dice GIF - Dice - Discover & Share GIFs",
+        "url": "https://tenor.com/view/dice-gif-22777333",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Almost Sure (@Almost_Sure) / Posts / X",
+        "url": "https://x.com/Almost_Sure",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Save Twenty - Math For Love",
+        "url": "https://mathforlove.com/lesson/save-twenty/",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "die - Wiktionary, the free dictionary",
+        "url": "https://en.wiktionary.org/wiki/die",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "JPEG XL Test Page",
+        "url": "https://thorium.rocks/misc/jxl-test-page/",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Stream Yohan Kadri-Caillaux music | Listen to songs, albums ...",
+        "url": "https://soundcloud.com/yohan-kadri-caillaux",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "22,110 Dice Stock Photos, High-Res Pictures, and Images ...",
+        "url": "https://www.gettyimages.com/photos/dice",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Big Dice Stock Photo - Download Image Now - Dice, Large ...",
+        "url": "https://www.istockphoto.com/photo/big-dice-gm174264237-24532198",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "27 Dice images ideas to save today | high speed photography ...",
+        "url": "https://uk.pinterest.com/geraintgeester/dice-images/",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Dice\" Images – Browse 1,013,698 Stock Photos, Vectors, and ...",
+        "url": "https://stock.adobe.com/search?k=%22+dice%22",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Activities and Tasks - YouCubed",
+        "url": "https://www.youcubed.org/tasks/",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "What is Subitizing?",
+        "url": "https://mybrightwheel.com/blog/what-is-subitizing",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Background Color — Thumbor 7.7.3 documentation",
+        "url": "https://thumbor.readthedocs.io/en/7.7.3/background_color.html",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Dice - Wikipedia",
+        "url": "https://en.wikipedia.org/wiki/Dice",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Global Arbitration Review",
+        "url": "https://globalarbitrationreview.com/",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Yatzy - Fun Classic Dice Game - Apps on Google Play",
+        "url": "https://play.google.com/store/apps/details?id=com.playvalve.yatzy",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "How To Play Yahtzee - YouTube",
+        "url": "https://www.youtube.com/watch?v=4Hcgc6oF2pc",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Dicebot | Slack Marketplace",
+        "url": "https://slack.com/marketplace/A0K7BALJ1-dicebot",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "PNG - Wikipedia : r/ClassicUsenet",
+        "url": "https://www.reddit.com/r/ClassicUsenet/comments/1eeceu2/png_wikipedia/",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Handmade 10,000 Board Game, also known as Farkle or Zilch",
+        "url": "https://www.facebook.com/groups/605468993776715/posts/1423877251935881/",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Qwixx | A Fast Family Dice Game | Gamewright",
+        "url": "https://gamewright.com/product/Qwixx",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "File:Dices1-4.png - Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:Dices1-4.png",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Steam Workshop::New bots",
+        "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=2648675232",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      },
+      {
+        "title": "Skaitļu teorija — Vikipēdija",
+        "url": "https://lv.wikipedia.org/wiki/Skait%C4%BCu_teorija",
+        "destination": null,
+        "description": null,
+        "isAmp": false
+      }
+    ],
+    "similar_images": [],
+    "pages_with_matching_images": []
+  },
+  "number_of_results": null
+}
