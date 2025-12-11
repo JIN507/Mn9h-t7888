@@ -1,10 +1,85 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Video, Film, AlertTriangle, Download, ScanFace, Globe, Search, ShieldCheck } from 'lucide-react';
+import { Film, AlertTriangle, Video, Globe, Search, ScanFace, ShieldCheck, PlayCircle, Music } from 'lucide-react';
 import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
 import GradientButton from '../components/GradientButton';
 import DropZone from '../components/DropZone';
+
+// Enhanced ResultCard Component matching AIDetection style
+const ResultCard = ({ score, title, icon: Icon, colorClass }) => {
+    const isAI = score > 0.5;
+    const percentage = Math.round(score * 100);
+
+    // Dynamic color mapping
+    const getColors = () => {
+        if (colorClass.includes('violet')) return { from: 'from-violet-500', to: 'to-purple-600', text: 'text-violet-600', bg: 'bg-violet-500' };
+        if (colorClass.includes('fuchsia')) return { from: 'from-fuchsia-500', to: 'to-pink-600', text: 'text-fuchsia-600', bg: 'bg-fuchsia-500' };
+        return { from: 'from-pink-500', to: 'to-rose-600', text: 'text-pink-600', bg: 'bg-pink-500' };
+    };
+
+    const colors = getColors();
+
+    return (
+        <GlassCard className="p-5 overflow-hidden relative">
+            {/* Header */}
+            <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-200/50">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-gradient-to-br ${colors.from} ${colors.to} shadow-lg`}>
+                    <Icon className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                    <h3 className="font-bold text-slate-800">{title}</h3>
+                    <p className="text-xs text-slate-500">Video Analysis Model</p>
+                </div>
+            </div>
+
+            {/* Verdict */}
+            <div className="text-center mb-6 relative z-10">
+                <div className={`inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-3 ${isAI
+                    ? 'bg-gradient-to-br from-red-400 to-rose-500 text-white shadow-red-200'
+                    : 'bg-gradient-to-br from-emerald-400 to-green-500 text-white shadow-emerald-200'
+                    } shadow-xl transform transition-transform hover:scale-105 duration-300`}>
+                    {isAI ? <AlertTriangle className="w-10 h-10" /> : <ShieldCheck className="w-10 h-10" />}
+                </div>
+                <h4 className={`text-xl font-black ${isAI ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {isAI ? 'محتوى معدل (AI)' : 'محتوى حقيقي'}
+                </h4>
+            </div>
+
+            {/* Probability Bars */}
+            <div className="space-y-4">
+                <div>
+                    <div className="flex justify-between text-xs font-bold mb-1">
+                        <span className="text-slate-600">احتمالية AI</span>
+                        <span className="text-red-500">{percentage}%</span>
+                    </div>
+                    <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+                        <div
+                            className="h-full bg-gradient-to-r from-red-400 to-rose-500 transition-all duration-1000"
+                            style={{ width: `${percentage}%` }}
+                        ></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div className="flex justify-between text-xs font-bold mb-1">
+                        <span className="text-slate-600">احتمالية حقيقي</span>
+                        <span className="text-emerald-600">{100 - percentage}%</span>
+                    </div>
+                    <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+                        <div
+                            className="h-full bg-gradient-to-r from-emerald-400 to-green-500 transition-all duration-1000"
+                            style={{ width: `${100 - percentage}%` }}
+                        ></div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Background Decoration */}
+            <div className={`absolute -bottom-10 -right-10 w-32 h-32 bg-gradient-to-br ${colors.from} ${colors.to} opacity-5 rounded-full blur-2xl pointer-events-none`}></div>
+        </GlassCard>
+    );
+};
 
 const VideoAnalysis = () => {
     const navigate = useNavigate();
@@ -15,31 +90,39 @@ const VideoAnalysis = () => {
     const [aiResult, setAiResult] = useState(null);
     const [error, setError] = useState(null);
 
-    // Helper to convert base64 to file
-    const dataURLtoFile = (dataurl, filename) => {
-        let arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
-            bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
-        while (n--) {
-            u8arr[n] = bstr.charCodeAt(n);
-        }
-        return new File([u8arr], filename, { type: mime });
-    };
-
     const handleAction = (frame, action) => {
-        const imageFile = dataURLtoFile(frame.data, `frame_${frame.timestamp}.jpg`);
+        try {
+            console.log('Action triggered:', action);
+            if (!frame.data) {
+                console.error('No frame data available');
+                return;
+            }
 
-        switch (action) {
-            case 'ai-detect':
-                navigate('/ai-detection', { state: { file: imageFile } });
-                break;
-            case 'direct-search':
-                navigate('/direct-search', { state: { file: imageFile } });
-                break;
-            case 'manual-search':
-                navigate('/reverse-search', { state: { file: imageFile } });
-                break;
-            default:
-                break;
+            // Fix: Pass dataUrl directly to avoid serialization issues
+            const transferState = {
+                file: null,
+                dataUrl: frame.data,
+                fileName: `frame_${frame.timestamp.toFixed(2)}.jpg`
+            };
+
+            console.log('Navigating with state:', transferState);
+
+            switch (action) {
+                case 'ai-detect':
+                    navigate('/ai-detection', { state: transferState });
+                    break;
+                case 'direct-search':
+                    navigate('/direct-search', { state: transferState });
+                    break;
+                case 'manual-search':
+                    navigate('/reverse-search', { state: transferState });
+                    break;
+                default:
+                    break;
+            }
+        } catch (e) {
+            console.error('Error in handleAction:', e);
+            setError('فشل في نقل الصورة: ' + e.message);
         }
     };
 
@@ -80,6 +163,8 @@ const VideoAnalysis = () => {
                 headers: { 'Content-Type': 'multipart/form-data' },
                 timeout: 125000 // 125s timeout (backend is 120s)
             });
+
+            console.log('AI Analysis Response:', response.data);
 
             if (response.data.success) {
                 setAiResult(response.data.data);
@@ -165,53 +250,33 @@ const VideoAnalysis = () => {
                         نتائج فحص الذكاء الاصطناعي
                     </h2>
 
-                    <div className="grid md:grid-cols-3 gap-6">
-                        {/* Video Score */}
-                        <GlassCard className="p-5">
-                            <h3 className="font-bold text-slate-800 mb-4 flex items-center">
-                                <Video className="w-5 h-5 ml-2 text-violet-500" />
-                                الفيديو (Video)
-                            </h3>
-                            <div className="text-center mb-4">
-                                <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full mb-2 ${aiResult.report.ai.video > 0.5 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'
-                                    }`}>
-                                    {aiResult.report.ai.video > 0.5 ? <AlertTriangle className="w-8 h-8" /> : <ShieldCheck className="w-8 h-8" />}
-                                </div>
-                                <p className={`font-black ${aiResult.report.ai.video > 0.5 ? 'text-red-600' : 'text-green-600'}`}>
-                                    {aiResult.report.ai.video > 0.5 ? 'معدل (AI)' : 'حقيقي'}
-                                </p>
-                            </div>
-                            <ScoreBar label="احتمالية AI" score={aiResult.report.ai.video} colorClass="text-violet-600" />
-                        </GlassCard>
-
-                        {/* Voice Score */}
-                        <GlassCard className="p-5">
-                            <h3 className="font-bold text-slate-800 mb-4 flex items-center">
-                                <span className="ml-2 text-2xl">🎤</span>
-                                الصوت (Voice)
-                            </h3>
-                            <div className="text-center mb-4">
-                                <span className={`font-black ${aiResult.report.ai.voice > 0.5 ? 'text-red-600' : 'text-green-600'}`}>
-                                    {aiResult.report.ai.voice > 0.5 ? 'معدل (AI)' : 'حقيقي'}
-                                </span>
-                            </div>
-                            <ScoreBar label="احتمالية AI" score={aiResult.report.ai.voice} colorClass="text-fuchsia-600" />
-                        </GlassCard>
-
-                        {/* Music Score */}
-                        <GlassCard className="p-5">
-                            <h3 className="font-bold text-slate-800 mb-4 flex items-center">
-                                <span className="ml-2 text-2xl">🎵</span>
-                                الموسيقى (Music)
-                            </h3>
-                            <div className="text-center mb-4">
-                                <span className={`font-black ${aiResult.report.ai.music > 0.5 ? 'text-red-600' : 'text-green-600'}`}>
-                                    {aiResult.report.ai.music > 0.5 ? 'معدل (AI)' : 'حقيقي'}
-                                </span>
-                            </div>
-                            <ScoreBar label="احتمالية AI" score={aiResult.report.ai.music} colorClass="text-pink-600" />
-                        </GlassCard>
-                    </div>
+                    {(!aiResult.report || (!aiResult.report.ai_video && !aiResult.report.ai)) ? (
+                        <div className="bg-slate-100 p-4 rounded text-sm overflow-auto max-h-96 text-left" dir="ltr">
+                            <p className="font-bold text-red-500 mb-2">Debug Data (Unexpected Structure):</p>
+                            <pre>{JSON.stringify(aiResult, null, 2)}</pre>
+                        </div>
+                    ) : (
+                        <div className="grid md:grid-cols-3 gap-6">
+                            <ResultCard
+                                title="الفيديو (Video)"
+                                score={aiResult.report.ai_video?.confidence || aiResult.report.ai?.video || 0}
+                                icon={Video}
+                                colorClass="text-violet-600"
+                            />
+                            <ResultCard
+                                title="الصوت (Voice)"
+                                score={aiResult.report.ai_voice?.confidence || aiResult.report.ai?.voice || 0}
+                                icon={PlayCircle}
+                                colorClass="text-fuchsia-600"
+                            />
+                            <ResultCard
+                                title="الموسيقى (Music)"
+                                score={aiResult.report.ai_music?.confidence || aiResult.report.ai?.music || 0}
+                                icon={Music}
+                                colorClass="text-pink-600"
+                            />
+                        </div>
+                    )}
                 </div>
             )}
 

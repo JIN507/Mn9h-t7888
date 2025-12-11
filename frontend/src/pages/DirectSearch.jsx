@@ -15,13 +15,44 @@ const DirectSearch = () => {
     const [error, setError] = useState(null);
     const [debugInfo, setDebugInfo] = useState(null);
 
+    // Helper to convert base64 to file
+    const dataURLtoFile = (dataurl, filename) => {
+        let arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
+            bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+        while (n--) {
+            u8arr[n] = bstr.charCodeAt(n);
+        }
+        return new File([u8arr], filename, { type: mime });
+    };
+
     // Handle file passed from navigation (e.g. from Video Analysis)
     useEffect(() => {
+        console.log('DirectSearch mounted. Location state:', location.state);
+        // Handle direct file passing
         if (location.state?.file) {
+            console.log('File received from navigation:', location.state.file);
             setSelectedFile(location.state.file);
-            // Optional: Auto-trigger search? Maybe better to let user click search.
+        }
+        // Handle dataUrl passing (safe for navigation)
+        else if (location.state?.dataUrl) {
+            console.log('DataURL received from navigation');
+            try {
+                const file = dataURLtoFile(location.state.dataUrl, location.state.fileName || 'image.jpg');
+                setSelectedFile(file);
+            } catch (e) {
+                console.error('Failed to convert DataURL to File:', e);
+            }
+        }
+        else {
+            console.log('No file passed in navigation state');
         }
     }, [location.state]);
+
+    const handleFileSelect = (file) => {
+        setSelectedFile(file);
+        setResults(null);
+        setDebugInfo(null);
+    };
 
     const handleSearch = async (e) => {
         e.preventDefault();
@@ -91,7 +122,12 @@ const DirectSearch = () => {
 
                     <form onSubmit={handleSearch}>
                         <div className="mb-6">
-                            <DropZone onFileSelect={(file) => setSelectedFile(file)} />
+                            <DropZone
+                                onFileSelect={handleFileSelect}
+                                headerText="ارفع صورة للبحث المباشر"
+                                subText="JPG, PNG, WEBP (Max 10MB)"
+                                initialFile={selectedFile}
+                            />
                         </div>
 
                         <div className="flex justify-end">

@@ -1529,6 +1529,7 @@ def api_analyze_video():
         
         if response.status_code == 200:
             result = response.json()
+            print('DEBUG AI Response:', json.dumps(result, indent=2))
             return jsonify({'success': True, 'data': result})
         elif response.status_code == 422:
              print(f'[!] Validation Error: {response.text}')

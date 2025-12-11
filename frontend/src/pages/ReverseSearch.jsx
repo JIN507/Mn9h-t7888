@@ -13,10 +13,28 @@ const ReverseSearch = () => {
     const [results, setResults] = useState(null);
     const [error, setError] = useState(null);
 
+    // Helper to convert base64 to file
+    const dataURLtoFile = (dataurl, filename) => {
+        try {
+            let arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
+                bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+            while (n--) {
+                u8arr[n] = bstr.charCodeAt(n);
+            }
+            return new File([u8arr], filename, { type: mime });
+        } catch (e) {
+            console.error('Conversion error:', e);
+            return null;
+        }
+    };
+
     // Handle file passed from navigation
     useEffect(() => {
         if (location.state?.file) {
             setFile(location.state.file);
+        } else if (location.state?.dataUrl) {
+            const f = dataURLtoFile(location.state.dataUrl, location.state.fileName || 'image.jpg');
+            if (f) setFile(f);
         }
     }, [location.state]);
 
@@ -70,10 +88,12 @@ const ReverseSearch = () => {
             <div className="grid md:grid-cols-2 gap-8 items-start">
                 {/* Upload Section */}
                 <div className="space-y-6 animate-fade-in-up delay-100">
-                    <GlassCard className="p-6">
+                    <GlassCard className="p-6 mb-8 animate-fade-in-up delay-100">
                         <DropZone
-                            onFileSelect={(f) => setFile(f)}
-                            headerText="ارفع الصورة للبحث"
+                            onFileSelect={setFile}
+                            headerText="ارفع صورة للبحث العكسي"
+                            subText="JPG, PNG, WEBP"
+                            initialFile={file}
                         />
 
                         <div className="mt-6 flex gap-3">
@@ -151,8 +171,8 @@ const ReverseSearch = () => {
                         </GlassCard>
                     )}
                 </div>
-            </div>
-        </div>
+            </div >
+        </div >
     );
 };
 

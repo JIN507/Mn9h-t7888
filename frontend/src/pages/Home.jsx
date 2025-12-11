@@ -91,14 +91,6 @@ const Home = () => {
                     delay="delay-100"
                 />
                 <FeatureCard
-                    to="/provenance"
-                    icon={Globe}
-                    title="أصل المحتوى"
-                    description="تتبع المصدر الأصلي للصورة ووقت ظهورها الأول على الشبكة."
-                    gradient="bg-gradient-to-br from-amber-500 to-orange-600"
-                    delay="delay-200"
-                />
-                <FeatureCard
                     to="/video"
                     icon={Video}
                     title="تحليل الفيديو"

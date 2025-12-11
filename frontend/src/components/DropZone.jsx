@@ -2,11 +2,25 @@ import { useRef, useState } from 'react';
 import { Upload, X, ImageIcon } from 'lucide-react';
 import clsx from 'clsx';
 
-const DropZone = ({ onFileSelect, headerText = "اسحب وأفلت الصورة هنا", subText = "أو انقر للاختيار", accept = "image/*" }) => {
+const DropZone = ({ onFileSelect, headerText = "اسحب وأفلت الصورة هنا", subText = "أو انقر للاختيار", accept = "image/*", initialFile = null }) => {
     const [dragActive, setDragActive] = useState(false);
     const [preview, setPreview] = useState(null);
     const [fileName, setFileName] = useState(null);
     const inputRef = useRef(null);
+
+    // Initialize with initialFile if provided
+    useState(() => {
+        if (initialFile) {
+            setFileName(initialFile.name);
+            if (initialFile.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    setPreview(e.target.result);
+                };
+                reader.readAsDataURL(initialFile);
+            }
+        }
+    }, [initialFile]);
 
     const handleDrag = (e) => {
         e.preventDefault();
