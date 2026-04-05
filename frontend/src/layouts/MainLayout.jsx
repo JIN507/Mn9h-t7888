@@ -1,42 +1,29 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import NavBar from '../components/NavBar';
-import HeroSection from '../components/HeroSection';
 
 const MainLayout = () => {
     const location = useLocation();
-    const isHomePage = location.pathname === '/';
 
     return (
-        <div className="min-h-screen flex flex-col relative">
-            {/* Animated Background Elements */}
-            <div className="bg-shapes"></div>
-            <div className="bg-pattern"></div>
+        <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#f8fafc', fontFamily: "'Tajawal', sans-serif" }}>
 
-            {/* Fixed Background Image (subtle, transparent) */}
-            <div
-                className="fixed inset-0 z-[-3] opacity-[0.03] pointer-events-none"
-                style={{
-                    backgroundImage: `url('/src/assets/tahaqqaq-bg.png')`,
-                    backgroundPosition: 'center',
-                    backgroundRepeat: 'no-repeat',
-                    backgroundSize: '60%',
-                }}
-            />
+            {/* Subtle background pattern */}
+            <div style={{
+                position: 'fixed', inset: 0, zIndex: -1,
+                background: 'radial-gradient(ellipse at 20% 50%, rgba(224,242,254,0.35) 0%, transparent 60%), radial-gradient(ellipse at 80% 10%, rgba(241,245,249,0.5) 0%, transparent 50%), #f8fafc',
+                pointerEvents: 'none',
+            }} />
 
             <NavBar />
 
-            {/* Hero Section - Only on Home Page */}
-            {isHomePage && <HeroSection />}
+            {/* Spacer: header (65px) + pill bar (60px) + padding — responsive */}
+            <div className="navbar-spacer" />
 
             {/* Main Content */}
-            <main className={`flex-grow container mx-auto px-4 pb-12 ${isHomePage ? 'pt-8' : 'pt-24'}`}>
+            <main className="main-content">
                 <Outlet />
             </main>
 
-            {/* Footer */}
-            <footer className="glass-nav py-6 text-center text-white/80">
-                <p className="font-medium">© {new Date().getFullYear()} منصة تحقق - جميع الحقوق محفوظة</p>
-            </footer>
         </div>
     );
 };

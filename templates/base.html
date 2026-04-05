@@ -11,92 +11,172 @@
     
     <style>
         :root {
-            --primary-color: #4338ca;
-            --primary-hover: #3730a3;
-            --secondary-color: #6366f1;
-            --accent-color: #8b5cf6;
-            --dark-text: #1e293b;
-            --light-text: #f8fafc;
-            --gradient-primary: linear-gradient(135deg, #4338ca 0%, #3730a3 100%);
-            --gradient-secondary: linear-gradient(135deg, #6366f1 0%, #4338ca 100%);
-            --gradient-accent: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
-            --shadow-hover: 0 12px 35px rgba(67, 56, 202, 0.25);
-            --shadow-card: 0 6px 20px rgba(67, 56, 202, 0.1);
-            --shadow-button: 0 4px 15px rgba(67, 56, 202, 0.3);
+            --bg-color: #f8fafc;
+            --surface-color: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --border-color: #e2e8f0;
+            --accent-color: #1e293b; /* Formal dark tone, instead of bright purple */
+            --accent-hover: #334155;
+            --shadow-subtle: 0 2px 10px rgba(0, 0, 0, 0.03);
+            --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.04);
+            --shadow-button: 0 4px 12px rgba(30, 41, 59, 0.15);
         }
         
         body {
             font-family: 'Tajawal', sans-serif;
-            background-color: #f8fafc;
+            background-color: var(--bg-color);
+            color: var(--text-main);
         }
         
-        .navbar {
-            background: var(--gradient-primary) !important;
-            box-shadow: 0 4px 12px rgba(67, 56, 202, 0.2);
-            padding: 1rem 0;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        ::selection {
+            background-color: #cbd5e1;
+            color: #0f172a;
+        }
+
+        /* --- Formal White Top Header --- */
+        .navbar-top {
+            background-color: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border-color);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+            padding: 0.8rem 0;
+            position: fixed;
+            top: 0;
+            width: 100%;
+            z-index: 1030;
+            transition: all 0.3s ease;
         }
         
         .navbar-brand {
             font-weight: 700;
             font-size: 1.6rem;
-            letter-spacing: 0.5px;
-            position: relative;
+            color: var(--text-main) !important;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            text-decoration: none;
+        }
+
+        /* SVG Logo Interaction */
+        .logo-svg {
+            width: 36px;
+            height: 36px;
+            margin-left: 12px;
+            transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            fill: none;
+            stroke: var(--accent-color);
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
         }
         
-        .navbar-brand:after {
-            content: '';
-            position: absolute;
-            bottom: -3px;
-            right: 0;
-            width: 0;
-            height: 3px;
-            background-color: var(--accent-color);
-            transition: width 0.3s ease;
+        .logo-svg .inner-path {
+            stroke-dasharray: 80;
+            stroke-dashoffset: 0;
+            transition: stroke-dashoffset 1.5s ease;
+        }
+
+        .navbar-brand:hover .logo-svg {
+            transform: scale(1.1) translateY(-2px);
         }
         
-        .navbar-brand:hover:after {
+        .navbar-brand:hover .logo-svg .inner-path {
+            stroke-dashoffset: 80; /* simple animation effect */
+        }
+
+        /* --- Glassmorphism Pill Categories Bar --- */
+        .categories-wrapper {
+            position: fixed;
+            top: 70px;
             width: 100%;
+            z-index: 1020;
+            padding: 1rem 0;
+            background: linear-gradient(to bottom, rgba(248, 250, 252, 0.95) 0%, rgba(248, 250, 252, 0) 100%);
+            display: flex;
+            justify-content: center;
+            pointer-events: none; /* Let clicks pass through the gradient background wrapper */
+        }
+
+        .glass-pill-bar {
+            pointer-events: auto; /* Re-enable clicks for the actual bar */
+            display: inline-flex;
+            background: rgba(255, 255, 255, 0.65);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            border-radius: 50px;
+            padding: 6px;
+            box-shadow: 0 8px 32px rgba(15, 23, 42, 0.05), inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+            gap: 4px;
+            overflow-x: auto;
+            max-width: 95%;
+            margin: 0 auto;
+        }
+
+        .glass-pill-bar::-webkit-scrollbar {
+            display: none;
+        }
+        .glass-pill-bar {
+            -ms-overflow-style: none;  
+            scrollbar-width: none;  
+        }
+
+        .pill-item {
+            color: #475569;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.95rem;
+            padding: 10px 24px;
+            border-radius: 40px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid transparent;
+        }
+
+        .pill-item i {
+            font-size: 1.1rem;
+            opacity: 0.7;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+
+        .pill-item:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.03);
+            border-color: rgba(226, 232, 240, 0.8);
+        }
+
+        .pill-item:hover i {
+            transform: scale(1.15) translateY(-1px);
+            opacity: 1;
+        }
+
+        /* Active State (Formal Dark Accent) */
+        .pill-item.active {
+            background: var(--accent-color);
+            color: #ffffff;
+            box-shadow: 0 4px 15px rgba(30, 41, 59, 0.25);
+            border-color: var(--accent-color);
         }
         
-        .nav-link {
-            font-weight: 500;
-            padding: 0.5rem 1rem;
-            margin: 0 0.3rem;
-            border-radius: 6px;
-            transition: all 0.3s ease;
-            position: relative;
+        .pill-item.active i {
+            opacity: 1;
+            color: #ffffff;
         }
         
-        .nav-link:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-            transform: translateY(-2px);
+        .pill-item.active:hover {
+            background: var(--accent-hover);
+            color: #ffffff;
         }
-        
-        .dropdown-menu {
-            border-radius: 8px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-            border: none;
-            padding: 0.5rem;
-            margin-top: 10px;
-            animation: fadeIn 0.3s ease-out;
-        }
-        
-        .dropdown-item {
-            border-radius: 4px;
-            padding: 0.6rem 1rem;
-            transition: all 0.2s;
-        }
-        
-        .dropdown-item:hover {
-            background: rgba(255,255,255,0.2) !important;
-            transform: translateX(5px);
-        }
-        
+
         footer {
-            background-color: #f1f5f9;
-            border-top: 1px solid #e2e8f0;
+            background-color: #ffffff;
+            border-top: 1px solid var(--border-color);
         }
         
         @keyframes fadeIn {
@@ -104,149 +184,110 @@
             to { opacity: 1; transform: translateY(0); }
         }
         
+        /* Buttons Redesign */
         .btn-primary {
-            background: var(--gradient-primary);
+            background: var(--accent-color);
             border: none;
-            border-radius: 50px;
+            border-radius: 8px; /* Formal, standard SaaS border-radius instead of full rounded */
             font-weight: 600;
+            color: #fff;
             box-shadow: var(--shadow-button);
-            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-            position: relative;
-            overflow: hidden;
-            letter-spacing: 0.5px;
+            transition: all 0.3s ease;
+            padding: 0.6rem 1.5rem;
         }
         
-        .btn-primary::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
-            transition: left 0.6s;
-        }
-        
-        .btn-primary:hover::before {
-            left: 100%;
+        .btn-primary:focus, .btn-primary:active {
+            background: var(--accent-color) !important; /* Keep formal black/dark */
+            box-shadow: 0 0 0 4px rgba(30, 41, 59, 0.2) !important;
         }
         
         .btn-primary:hover {
-            background: var(--gradient-secondary);
-            transform: translateY(-4px) scale(1.02);
-            box-shadow: var(--shadow-hover);
-        }
-        
-        .btn-primary:active {
-            transform: translateY(-2px) scale(0.98);
-            transition: all 0.1s;
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(30, 41, 59, 0.2);
         }
         
         .container {
-            animation: fadeIn 0.5s ease-out;
+            animation: fadeIn 0.4s ease-out;
+        }
+        
+        /* Layout Adjustments */
+        .main-content-layout {
+            margin-top: 160px; /* Spacer for header + pill bar */
+            min-height: calc(100vh - 250px);
         }
     </style>
     {% block head %}{% endblock %}
 </head>
 <body>
-    <header class="navbar navbar-expand-lg navbar-dark py-3 fixed-top">
-        <div class="container">
-            <a href="/" class="navbar-brand d-flex align-items-center">
-                <i class="fas fa-shield-alt me-2"></i> منصة تحقق
+    <!-- Main Top Header -->
+    <header class="navbar-top">
+        <div class="container d-flex justify-content-between align-items-center">
+            <a href="/" class="navbar-brand">
+                <!-- Formal SVG Logo -->
+                <svg class="logo-svg me-3" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Outer Shield/Box -->
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" style="stroke-width: 1.5;"></path>
+                    <!-- Inner Checkmark -->
+                    <path class="inner-path" d="M9 12l2 2 4-4"></path>
+                </svg>
+                <span class="brand-text">منصة تحقق</span>
             </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMain" aria-controls="navbarMain" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
             
-            <div class="collapse navbar-collapse" id="navbarMain">
-                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle text-white" href="#" id="imagesDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="fas fa-images me-1"></i> الصور
-                        </a>
-                        <ul class="dropdown-menu shadow-lg border-0" aria-labelledby="imagesDropdown" style="min-width: 280px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-                            <li class="dropdown-header text-white fw-bold" style="background: rgba(255,255,255,0.1); border-radius: 8px; margin: 8px;">
-                                <i class="fas fa-search me-2"></i>أدوات البحث والتحليل
-                            </li>
-                            <li><hr class="dropdown-divider" style="border-color: rgba(255,255,255,0.2);"></li>
-                            <li>
-                                <a class="dropdown-item py-2 text-white" href="/" style="background: rgba(255,255,255,0.1); margin: 4px 8px; border-radius: 6px; transition: all 0.3s;">
-                                    <div class="d-flex align-items-center">
-                                        <div class="me-3">
-                                            <i class="fas fa-search" style="width: 20px; color: #4fc3f7;"></i>
-                                        </div>
-                                        <div>
-                                            <div class="fw-semibold">البحث العكسي</div>
-                                            <small style="color: rgba(255,255,255,0.8);">البحث عن مصدر الصورة</small>
-                                        </div>
-                                    </div>
-                                </a>
-                            </li>
-                            <li>
-                                <a class="dropdown-item py-2 text-white" href="/ai-detection" style="background: rgba(255,255,255,0.1); margin: 4px 8px; border-radius: 6px; transition: all 0.3s;">
-                                    <div class="d-flex align-items-center">
-                                        <div class="me-3">
-                                            <i class="fas fa-robot" style="width: 20px; color: #66bb6a;"></i>
-                                        </div>
-                                        <div>
-                                            <div class="fw-semibold">كشف الصور</div>
-                                            <small style="color: rgba(255,255,255,0.8);">اكتشاف الصور المولدة بالذكاء الاصطناعي</small>
-                                        </div>
-                                    </div>
-                                </a>
-                            </li>
-                            <li>
-                                <a class="dropdown-item py-2 text-white" href="/provenance" style="background: rgba(255,255,255,0.1); margin: 4px 8px; border-radius: 6px; transition: all 0.3s;">
-                                    <div class="d-flex align-items-center">
-                                        <div class="me-3">
-                                            <i class="fas fa-history" style="width: 20px; color: #ffb74d;"></i>
-                                        </div>
-                                        <div>
-                                            <div class="fw-semibold">أصل المحتوى</div>
-                                            <small style="color: rgba(255,255,255,0.8);">تتبع أول ظهور للصورة</small>
-                                        </div>
-                                    </div>
-                                </a>
-                            </li>
-                            <li><hr class="dropdown-divider" style="border-color: rgba(255,255,255,0.2);"></li>
-                            <li style="display: none;">
-                                <a class="dropdown-item py-2 text-white" href="/image-source-search" style="background: rgba(255,255,255,0.1); margin: 4px 8px; border-radius: 6px; transition: all 0.3s;">
-                                    <div class="d-flex align-items-center">
-                                        <div class="me-3">
-                                            <i class="fas fa-bolt" style="width: 20px; color: #ff7043;"></i>
-                                        </div>
-                                        <div>
-                                            <div class="fw-semibold">البحث المباشر</div>
-                                            <small style="color: rgba(255,255,255,0.8);">البحث المباشر عن مصدر الصورة</small>
-                                        </div>
-                                    </div>
-                                </a>
-                            </li>
-                        </ul>
-                    </li>
-                    <li class="nav-item">
-                        <a href="/video" class="nav-link text-white">
-                            <i class="fas fa-video me-1"></i> مصدر الفيديو
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="/audio-verification" class="nav-link text-white">
-                            <i class="fas fa-microphone me-1"></i> كشف الصوت
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="https://majednews.netlify.app/" class="nav-link text-white">
-                            <i class="fas fa-newspaper me-1"></i> التحقق من الأخبار
-                        </a>
-                    </li>
-                </ul>
+            <!-- Optional Top Right Action (e.g., login or version tag) -->
+            <div class="d-none d-md-flex">
+                <span class="badge bg-light text-dark border px-3 py-2 rounded-pill shadow-sm" style="font-size: 0.85rem; font-weight: 600;">V3.2 المنظومة الرسمية</span>
             </div>
         </div>
     </header>
     
-    <div style="margin-top: 85px;"></div><!-- Spacer for fixed header -->
+    <!-- Glassmorphism Categories Pill Bar -->
+    <div class="categories-wrapper">
+        <nav class="glass-pill-bar" id="pill-nav">
+            <a href="/" class="pill-item" data-path="/">
+                <i class="fas fa-search"></i> البحث العكسي
+            </a>
+            <a href="/ai-detection" class="pill-item" data-path="/ai-detection">
+                <i class="fas fa-robot"></i> كشف الصور
+            </a>
+            <a href="/provenance" class="pill-item" data-path="/provenance">
+                <i class="fas fa-history"></i> أصل المحتوى
+            </a>
+            <a href="/video" class="pill-item" data-path="/video">
+                <i class="fas fa-video"></i> مصدر الفيديو
+            </a>
+            <a href="/audio-verification" class="pill-item" data-path="/audio-verification">
+                <i class="fas fa-microphone"></i> كشف الصوت
+            </a>
+            <a href="https://majednews.netlify.app/" class="pill-item">
+                <i class="fas fa-newspaper"></i> أخبار المنصة
+            </a>
+        </nav>
+    </div>
 
-    <main class="container my-5">
+    <!-- Script to set active pill item based on URL -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const currentPath = window.location.pathname;
+            const navItems = document.querySelectorAll('#pill-nav .pill-item');
+            
+            navItems.forEach(item => {
+                const path = item.getAttribute('data-path');
+                // Exact match or active if it's not root and matches start
+                if(path && (currentPath === path || (path !== '/' && currentPath.startsWith(path)))) {
+                    item.classList.add('active');
+                }
+            });
+            
+            // If none matched and we are at root, make first one active
+            if(currentPath === '/' && !document.querySelector('#pill-nav .pill-item.active')) {
+                const first = document.querySelector('#pill-nav .pill-item[data-path="/"]');
+                if (first) first.classList.add('active');
+            }
+        });
+    </script>
+
+    <main class="container main-content-layout mb-5">
         <div class="fade-in">
             {% block content %}{% endblock %}
         </div>

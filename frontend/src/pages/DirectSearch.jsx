@@ -130,12 +130,13 @@ const DirectSearch = () => {
                             />
                         </div>
 
-                        <div className="flex justify-end">
+                        <div className="flex justify-center mt-6">
                             <GradientButton
                                 type="submit"
                                 isLoading={loading}
                                 icon={Search}
                                 disabled={!selectedFile}
+                                className="px-10"
                             >
                                 تحليل الجدول الزمني
                             </GradientButton>

@@ -1,3 +1,9 @@
+databases:
+  - name: bahith-db
+    databaseName: bahith
+    user: bahith_user
+    plan: free
+
 services:
   - type: web
     name: bahith-al-suwar
@@ -5,6 +11,22 @@ services:
     buildCommand: "./build.sh"
     startCommand: gunicorn app:app
     envVars:
+      # Database - auto-populated from Render Postgres
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bahith-db
+          property: connectionString
+      # Security - auto-generated secret
+      - key: SECRET_KEY
+        generateValue: true
+      # Admin Bootstrap (set in Render dashboard - not synced)
+      - key: ADMIN_EMAIL
+        value: admin@tahaqaq.sa
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_NAME
+        value: مسؤول النظام
+      # Existing config
       - key: USER_DATA_PATH
         value: /tmp/user_data
       - key: USER_DATA_DASH_PATH

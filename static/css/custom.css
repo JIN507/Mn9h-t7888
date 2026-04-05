@@ -5,31 +5,31 @@
     text-align: right;
 }
 
-/* Custom Colors */
+/* Custom Colors (Formal White Theme) */
 :root {
-    --primary-color: #2563eb;
-    --secondary-color: #26a69a;
-    --accent-color: #ff5722;
-    --background-color: #f5f5f5;
-    --text-color: #333333;
+    --primary-color: #0f172a; /* Formal Dark Slate */
+    --secondary-color: #334155;
+    --accent-color: #1e293b;
+    --background-color: #f8fafc;
+    --text-color: #0f172a;
 }
 
 /* Override Bootstrap's primary color */
 .bg-primary {
-    background-color: #2563eb !important;
+    background-color: var(--primary-color) !important;
 }
 
 .btn-primary {
-    background-color: #2563eb !important;
-    border-color: #2563eb !important;
+    background-color: var(--primary-color) !important;
+    border-color: var(--primary-color) !important;
 }
 
 .progress-bar {
-    background-color: #2563eb !important;
+    background-color: var(--primary-color) !important;
 }
 
 .text-primary {
-    color: #2563eb !important;
+    color: var(--primary-color) !important;
 }
 
 body {
@@ -52,11 +52,14 @@ header {
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    border: 2px dashed #cbd5e1 !important;
+    border-radius: 12px;
+    background-color: #ffffff;
 }
 
 .upload-area:hover {
-    border-color: #2563eb !important;
-    background-color: rgba(37, 99, 235, 0.1);
+    border-color: var(--primary-color) !important;
+    background-color: #f1f5f9;
 }
 
 /* Preview */
@@ -67,33 +70,34 @@ header {
 
 /* Cards and UI Elements */
 .card-header {
-    background-color: rgba(37, 99, 235, 0.2) !important;
-    border-bottom: 1px solid rgba(37, 99, 235, 0.3);
+    background-color: #f8fafc !important;
+    border-bottom: 1px solid #e2e8f0;
+    font-weight: 600;
 }
 
 /* Nav links and tabs styling */
 .nav-link:hover, .nav-link:focus {
-    color: #2563eb !important;
+    color: var(--primary-color) !important;
 }
 
 /* Custom nav-tabs styling */
 .nav-tabs .nav-link {
-    color: #6c757d;
+    color: #64748b;
     border-bottom: 2px solid transparent;
 }
 
 .nav-tabs .nav-link:hover,
 .nav-tabs .nav-link:focus {
-    color: #2563eb !important;
-    border-bottom-color: rgba(37, 99, 235, 0.3);
+    color: var(--primary-color) !important;
+    border-bottom-color: #cbd5e1;
 }
 
 .nav-tabs .nav-link.active {
-    color: #2563eb !important;
+    color: var(--primary-color) !important;
     background-color: transparent;
-    border-color: rgba(37, 99, 235, 0.2);
-    border-bottom-color: #2563eb;
-    font-weight: 500;
+    border-color: #e2e8f0;
+    border-bottom-color: var(--primary-color);
+    font-weight: 600;
 }
 
 /* Ensure the dropdown items use the correct color */
@@ -101,31 +105,24 @@ header {
     color: #555;
 }
 
-/* Header nav links - ensure they're white when in header */
-header .nav-link {
-    color: #fff !important;
-}
-
-header .nav-link:hover,
-header .nav-link:focus {
-    color: rgba(255, 255, 255, 0.85) !important;
-}
+/* Header nav links styling removed since we use pill bar now */
 
 .dropdown-item:active, .dropdown-item:focus {
-    background-color: #2563eb !important;
+    background-color: #f1f5f9 !important;
+    color: var(--primary-color);
 }
 
 a {
-    color: #2563eb;
+    color: var(--primary-color);
 }
 
 a:hover {
-    color: rgba(37, 99, 235, 0.8);
+    color: var(--secondary-color);
 }
 
 .form-control:focus, .form-select:focus {
-    border-color: #2563eb;
-    box-shadow: 0 0 0 0.25rem rgba(37, 99, 235, 0.25);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(15, 23, 42, 0.1);
 }
 
 /* Results */
@@ -172,26 +169,29 @@ footer {
 }
 
 .btn-primary:hover {
-    background-color: #1d4ed8;
-    border-color: #1d4ed8;
-}
-
-.btn-success {
     background-color: var(--secondary-color);
     border-color: var(--secondary-color);
 }
 
+.btn-success {
+    background-color: #10b981;
+    border-color: #10b981;
+}
+
 .btn-success:hover {
-    background-color: #00897b;
-    border-color: #00897b;
+    background-color: #059669;
+    border-color: #059669;
 }
 
 /* Card Styling */
 .card {
-    transition: transform 0.3s ease;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
 }
 
 .card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
 }

@@ -1,22 +1,30 @@
-Flask==2.0.1
-Flask-Cors==3.0.10
-requests==2.26.0
-Pillow==8.3.2
-opencv-python-headless==4.5.3.56
-python-dotenv==0.19.1
-Werkzeug==2.0.1
-flask-babel==2.0.0
-python-magic==0.4.24
-numpy==1.21.2
-playwright==1.35.0
-# Captcha handling dependencies
-pydub==0.25.1
-SpeechRecognition==3.10.0
-# Google Cloud Vision API for reverse image search
-google-cloud-vision==3.4.0
-# Production server
-gunicorn==20.1.0
-# Translation and Date parsing
-deep-translator==1.11.4
-dateparser==1.2.0
-beautifulsoup4==4.12.2
+# الأساسيات (Backend & Web Server)
+Flask>=2.3.0
+Flask-Cors>=4.0.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+Werkzeug>=2.3.0
+gunicorn>=21.2.0
+
+# قاعدة البيانات والأمان
+Flask-SQLAlchemy>=3.1.0
+Flask-Bcrypt>=1.0.1
+psycopg2-binary>=2.9.9
+PyJWT>=2.8.0
+
+# معالجة الصور والفيديو (AI & Computer Vision)
+Pillow>=10.0.0
+opencv-python-headless>=4.8.0.0
+numpy>=1.24.0
+google-cloud-vision>=3.4.0
+
+# معالجة الصوت والترجمة
+pydub>=0.25.1
+SpeechRecognition>=3.10.0
+deep-translator>=1.11.4
+dateparser>=1.2.0
+
+# تحليل الويب والأتمتة (Scraping)
+playwright>=1.35.0
+beautifulsoup4>=4.12.2
+python-magic>=0.4.27

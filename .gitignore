@@ -40,3 +40,12 @@ Thumbs.db
 
 # Environment files
 .env
+
+# User files storage
+user_files/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
