@@ -834,60 +834,62 @@ def direct_search_api():
         if not query and not image_url:
             return jsonify({'error': 'No query or image provided', 'success': False}), 400
 
-        print(f"[*] Starting Zenserp search. Query: {query}, Image: {image_url}")
+        print(f"[*] Starting SerpAPI search. Query: {query}, Image: {image_url}")
         
-        # Zenserp Search Logic
-        headers = {'apikey': ZENSERP_API_KEY}
-        
-        if not ZENSERP_API_KEY:
-            print("[!] ZENSERP_API_KEY is not set!")
-            return jsonify({'error': 'مفتاح ZenSerp API غير مهيأ على الخادم', 'success': False}), 500
+        # SerpAPI Search Logic
+        if not SERPAPI_API_KEY:
+            print("[!] SERPAPI_API_KEY is not set!")
+            return jsonify({'error': 'مفتاح SerpAPI غير مهيأ على الخادم', 'success': False}), 500
 
         resp = None
         max_retries = 3
         
         if image_url:
-            # Reverse Image Search - use image_url parameter per Zenserp docs
+            # Reverse Image Search via SerpAPI
             params = {
+                'engine': 'google_reverse_image',
                 'image_url': image_url,
-                'gl': 'us',              # Keep US for broader search, we will translate
-                'hl': 'en'               # Keep English for better source data
+                'gl': 'us',
+                'hl': 'en',
+                'api_key': SERPAPI_API_KEY
             }
-            print(f"[*] Zenserp reverse image search params: {params}")
+            print(f"[*] SerpAPI reverse image search params: {params}")
             
             for attempt in range(max_retries):
-                resp = requests.get('https://app.zenserp.com/api/v2/search', headers=headers, params=params, timeout=90)
+                resp = requests.get('https://serpapi.com/search', params=params, timeout=90)
                 if resp.status_code == 200:
                     break
-                print(f"[!] Zenserp attempt {attempt+1}/{max_retries} failed with status {resp.status_code}")
+                print(f"[!] SerpAPI attempt {attempt+1}/{max_retries} failed with status {resp.status_code}")
                 if attempt < max_retries - 1:
-                    time.sleep(2)  # Wait before retry
+                    time.sleep(2)
             
         else:
-            # Text Search
+            # Text Search via SerpAPI
             params = {
+                'engine': 'google',
                 'q': query,
-                'num': 40, # Fetch more initially, then filter
+                'num': 40,
                 'gl': 'sa',
-                'hl': 'ar'
+                'hl': 'ar',
+                'api_key': SERPAPI_API_KEY
             }
             for attempt in range(max_retries):
-                resp = requests.get('https://app.zenserp.com/api/v2/search', headers=headers, params=params, timeout=60)
+                resp = requests.get('https://serpapi.com/search', params=params, timeout=60)
                 if resp.status_code == 200:
                     break
-                print(f"[!] Zenserp attempt {attempt+1}/{max_retries} failed with status {resp.status_code}")
+                print(f"[!] SerpAPI attempt {attempt+1}/{max_retries} failed with status {resp.status_code}")
                 if attempt < max_retries - 1:
                     time.sleep(2)
 
-        print(f"[*] Zenserp response status: {resp.status_code}")
+        print(f"[*] SerpAPI response status: {resp.status_code}")
         
         if resp.status_code != 200:
-            print(f"[!] Zenserp API Error: {resp.text}")
+            print(f"[!] SerpAPI Error: {resp.text}")
             error_detail = resp.text[:200] if resp.text else 'Unknown error'
-            return jsonify({'error': f'خطأ من خدمة ZenSerp (رمز {resp.status_code}). قد يكون هناك مشكلة مؤقتة، حاول مرة أخرى.', 'details': error_detail, 'success': False}), 502
+            return jsonify({'error': f'خطأ من خدمة SerpAPI (رمز {resp.status_code}). قد يكون هناك مشكلة مؤقتة، حاول مرة أخرى.', 'details': error_detail, 'success': False}), 502
 
-        zenserp_data = resp.json()
-        print(f"[*] Zenserp response keys: {zenserp_data.keys()}")
+        serpapi_data = resp.json()
+        print(f"[*] SerpAPI response keys: {list(serpapi_data.keys())}")
         
         # Initialize translation
         try:
@@ -909,20 +911,22 @@ def direct_search_api():
         # Process results into a standard timeline format
         items_to_process = []
         
-        # Helper to parse Zenserp results (without translation yet)
+        # Helper to parse SerpAPI results
         def parse_item(item, source_type='web'):
             title = item.get('title', 'No Title')
-            link = item.get('url') or item.get('link') or item.get('destination')
-            snippet = item.get('description') or item.get('snippet') or item.get('title')
+            link = item.get('link') or item.get('url') or item.get('destination')
+            snippet = item.get('snippet') or item.get('description') or item.get('title')
             thumbnail = item.get('thumbnail') or item.get('image')
             
-            # Extract Date
-            date_str = item.get('date') or item.get('snippet_highlighted_words', [None])[0] if isinstance(item.get('snippet_highlighted_words'), list) else None
+            # Extract Date - SerpAPI provides 'date' field in organic results
+            date_str = item.get('date')
+            
+            # Try snippet_highlighted_words
+            if not date_str and isinstance(item.get('snippet_highlighted_words'), list) and item['snippet_highlighted_words']:
+                date_str = item['snippet_highlighted_words'][0]
             
             # Helper to extract date from snippet text if date_str is missing
             if not date_str and snippet:
-                # Expanded Regex for English and Arabic dates
-                import re
                 date_candidates = []
                 
                 # 1. Standard Date: "Oct 25, 2023" or "2023-10-25"
@@ -954,7 +958,6 @@ def direct_search_api():
             if date_str:
                 try:
                     if DATEPARSER_AVAILABLE:
-                         # Explicitly hint Arabic and English
                          dt = dateparser.parse(date_str, languages=['ar', 'en'])
                          if dt: timestamp = dt.isoformat()
                 except:
@@ -971,28 +974,31 @@ def direct_search_api():
                 'type': source_type
             }
 
-        # Harvest results from all sections
-        sections_to_check = [
-            ('reverse_image_results', ['organic', 'pages_with_matching_images']),
-            ('organic', None),
-            ('image_results', None)
-        ]
+        # Harvest results from SerpAPI response
+        # SerpAPI returns: inline_images, organic_results, image_results, 
+        # and for reverse image: image_sizes, pages_with_matching_images
         
-        for section, subsections in sections_to_check:
-            if section in zenserp_data:
-                data_section = zenserp_data[section]
-                
-                # Handle nested structure (reverse_image_results)
-                if subsections and isinstance(data_section, dict):
-                    for sub in subsections:
-                        if sub in data_section and data_section[sub]:
-                            for item in data_section[sub]:
-                                items_to_process.append(parse_item(item, 'organic'))
-                
-                # Handle list structure (organic, image_results)
-                elif isinstance(data_section, list):
-                     for item in data_section:
-                        items_to_process.append(parse_item(item, 'organic'))
+        # Reverse image search results
+        if 'inline_images' in serpapi_data:
+            for item in serpapi_data['inline_images']:
+                items_to_process.append(parse_item(item, 'image'))
+        
+        if 'image_sizes' in serpapi_data:
+            for item in serpapi_data['image_sizes']:
+                items_to_process.append(parse_item(item, 'image'))
+
+        if 'pages_with_matching_images' in serpapi_data:
+            for item in serpapi_data['pages_with_matching_images']:
+                items_to_process.append(parse_item(item, 'organic'))
+        
+        # Organic/text search results
+        if 'organic_results' in serpapi_data:
+            for item in serpapi_data['organic_results']:
+                items_to_process.append(parse_item(item, 'organic'))
+        
+        if 'image_results' in serpapi_data:
+            for item in serpapi_data['image_results']:
+                items_to_process.append(parse_item(item, 'image'))
 
         # Remove duplicates based on link
         seen_links = set()
