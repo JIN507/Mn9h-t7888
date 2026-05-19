@@ -843,6 +843,7 @@ def direct_search_api():
 
         resp = None
         max_retries = 3
+        last_error = None
         
         if image_url:
             # Reverse Image Search via SerpAPI
@@ -853,15 +854,21 @@ def direct_search_api():
                 'hl': 'en',
                 'api_key': SERPAPI_API_KEY
             }
-            print(f"[*] SerpAPI reverse image search params: {params}")
+            print(f"[*] SerpAPI reverse image search params (key hidden): engine={params['engine']}, image_url={params['image_url']}")
             
             for attempt in range(max_retries):
-                resp = requests.get('https://serpapi.com/search', params=params, timeout=90)
-                if resp.status_code == 200:
-                    break
-                print(f"[!] SerpAPI attempt {attempt+1}/{max_retries} failed with status {resp.status_code}")
+                try:
+                    timeout_val = 90 + (attempt * 30)  # 90s, 120s, 150s
+                    resp = requests.get('https://serpapi.com/search', params=params, timeout=timeout_val)
+                    if resp.status_code == 200:
+                        break
+                    print(f"[!] SerpAPI attempt {attempt+1}/{max_retries} failed with status {resp.status_code}")
+                except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                    last_error = str(e)
+                    print(f"[!] SerpAPI attempt {attempt+1}/{max_retries} timed out: {last_error}")
+                    resp = None
                 if attempt < max_retries - 1:
-                    time.sleep(2)
+                    time.sleep(3)
             
         else:
             # Text Search via SerpAPI
@@ -874,12 +881,23 @@ def direct_search_api():
                 'api_key': SERPAPI_API_KEY
             }
             for attempt in range(max_retries):
-                resp = requests.get('https://serpapi.com/search', params=params, timeout=60)
-                if resp.status_code == 200:
-                    break
-                print(f"[!] SerpAPI attempt {attempt+1}/{max_retries} failed with status {resp.status_code}")
+                try:
+                    timeout_val = 60 + (attempt * 20)  # 60s, 80s, 100s
+                    resp = requests.get('https://serpapi.com/search', params=params, timeout=timeout_val)
+                    if resp.status_code == 200:
+                        break
+                    print(f"[!] SerpAPI attempt {attempt+1}/{max_retries} failed with status {resp.status_code}")
+                except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                    last_error = str(e)
+                    print(f"[!] SerpAPI attempt {attempt+1}/{max_retries} timed out: {last_error}")
+                    resp = None
                 if attempt < max_retries - 1:
-                    time.sleep(2)
+                    time.sleep(3)
+
+        # Handle case where all retries failed with timeout (resp is None)
+        if resp is None:
+            print(f"[!] All SerpAPI attempts failed. Last error: {last_error}")
+            return jsonify({'error': 'انتهت مهلة الاتصال بخدمة البحث. يرجى المحاولة مرة أخرى لاحقاً.', 'details': last_error, 'success': False}), 504
 
         print(f"[*] SerpAPI response status: {resp.status_code}")
         
