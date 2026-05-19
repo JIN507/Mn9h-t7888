@@ -1644,14 +1644,15 @@ def api_text_detection():
             'Authorization': f'Bearer {aiornot_key}'
         }
         
-        # Match the official Python example exactly
-        data = {'text': text_content}
+        # Send as multipart/form-data (AIorNot v2 expects this, despite docs example).
+        # Using `files=` forces requests to set Content-Type: multipart/form-data with boundary.
+        files = {'text': (None, text_content)}
         params = {
             'include_annotations': 'true'
         }
         
         print(f'[*] Sending text ({len(text_content)} chars) to AIorNot Text API...')
-        resp = req.post(url, headers=headers, data=data, params=params, timeout=60)
+        resp = req.post(url, headers=headers, files=files, params=params, timeout=60)
         
         print(f'[*] Response status: {resp.status_code}')
         
