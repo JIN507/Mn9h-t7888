@@ -839,6 +839,13 @@ def direct_search_api():
         # Zenserp Search Logic
         headers = {'apikey': ZENSERP_API_KEY}
         
+        if not ZENSERP_API_KEY:
+            print("[!] ZENSERP_API_KEY is not set!")
+            return jsonify({'error': 'مفتاح ZenSerp API غير مهيأ على الخادم', 'success': False}), 500
+
+        resp = None
+        max_retries = 3
+        
         if image_url:
             # Reverse Image Search - use image_url parameter per Zenserp docs
             params = {
@@ -847,7 +854,14 @@ def direct_search_api():
                 'hl': 'en'               # Keep English for better source data
             }
             print(f"[*] Zenserp reverse image search params: {params}")
-            resp = requests.get('https://app.zenserp.com/api/v2/search', headers=headers, params=params, timeout=90)
+            
+            for attempt in range(max_retries):
+                resp = requests.get('https://app.zenserp.com/api/v2/search', headers=headers, params=params, timeout=90)
+                if resp.status_code == 200:
+                    break
+                print(f"[!] Zenserp attempt {attempt+1}/{max_retries} failed with status {resp.status_code}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)  # Wait before retry
             
         else:
             # Text Search
@@ -857,13 +871,20 @@ def direct_search_api():
                 'gl': 'sa',
                 'hl': 'ar'
             }
-            resp = requests.get('https://app.zenserp.com/api/v2/search', headers=headers, params=params, timeout=60)
+            for attempt in range(max_retries):
+                resp = requests.get('https://app.zenserp.com/api/v2/search', headers=headers, params=params, timeout=60)
+                if resp.status_code == 200:
+                    break
+                print(f"[!] Zenserp attempt {attempt+1}/{max_retries} failed with status {resp.status_code}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
 
         print(f"[*] Zenserp response status: {resp.status_code}")
         
         if resp.status_code != 200:
             print(f"[!] Zenserp API Error: {resp.text}")
-            return jsonify({'error': f'Zenserp API Error: {resp.status_code}', 'details': resp.text, 'success': False}), 502
+            error_detail = resp.text[:200] if resp.text else 'Unknown error'
+            return jsonify({'error': f'خطأ من خدمة ZenSerp (رمز {resp.status_code}). قد يكون هناك مشكلة مؤقتة، حاول مرة أخرى.', 'details': error_detail, 'success': False}), 502
 
         zenserp_data = resp.json()
         print(f"[*] Zenserp response keys: {zenserp_data.keys()}")
