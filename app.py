@@ -1666,6 +1666,11 @@ def api_text_detection():
         
         result = resp.json()
         print(f'[*] Text API response received')
+        # Log full response for debugging (truncated to avoid huge logs)
+        try:
+            print(f'[*] Raw response: {json.dumps(result, ensure_ascii=False)[:1500]}')
+        except Exception:
+            pass
         
         # Actual structure: report.ai_text { confidence, is_detected, annotations: [[text, score], ...] }
         report_obj = result.get('report', {})
@@ -1683,18 +1688,24 @@ def api_text_detection():
             verdict_text = "نص مُولّد بالذكاء الاصطناعي" if is_ai else "نص بشري (غير مُولّد بالذكاء الاصطناعي)"
             
             # Parse annotations — format is [[text, score], [text, score], ...]
+            # `score` is the per-block AI probability (0.0 = human, 1.0 = AI)
             annotations = []
             raw_annotations = ai_text.get('annotations', [])
             if isinstance(raw_annotations, list):
                 for block in raw_annotations:
                     if isinstance(block, list) and len(block) >= 2:
                         block_text = str(block[0])
-                        block_score = float(block[1]) if isinstance(block[1], (int, float)) else 0.0
-                        # Score seems to be per-block — lower means more AI-like
+                        try:
+                            block_score = float(block[1])
+                        except (TypeError, ValueError):
+                            block_score = 0.0
+                        # Clamp to [0, 1]
+                        block_score = max(0.0, min(block_score, 1.0))
+                        block_is_ai = block_score >= 0.5
                         annotations.append({
                             'text': block_text.strip(),
-                            'is_ai': is_ai,  # Use overall verdict for block classification
-                            'confidence': ai_confidence
+                            'is_ai': block_is_ai,
+                            'confidence': block_score  # per-block AI probability
                         })
             
             return jsonify({
