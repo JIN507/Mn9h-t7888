@@ -1647,7 +1647,7 @@ def api_text_detection():
         # Match the official Python example exactly
         data = {'text': text_content}
         params = {
-            'include_annotations': True
+            'include_annotations': 'true'
         }
         
         print(f'[*] Sending text ({len(text_content)} chars) to AIorNot Text API...')
