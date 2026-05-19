@@ -846,15 +846,17 @@ def direct_search_api():
         last_error = None
         
         if image_url:
-            # Reverse Image Search via SerpAPI
+            # Google Lens with type=exact_matches for image provenance/history
+            # This returns webpages where this EXACT image appears
             params = {
-                'engine': 'google_reverse_image',
-                'image_url': image_url,
-                'gl': 'us',
+                'engine': 'google_lens',
+                'url': image_url,
+                'type': 'exact_matches',
                 'hl': 'en',
+                'country': 'us',
                 'api_key': SERPAPI_API_KEY
             }
-            print(f"[*] SerpAPI reverse image search params (key hidden): engine={params['engine']}, image_url={params['image_url']}")
+            print(f"[*] SerpAPI Google Lens (exact_matches) params (key hidden): url={params['url']}")
             
             for attempt in range(max_retries):
                 try:
@@ -962,14 +964,16 @@ def direct_search_api():
                 if date_candidates:
                     date_str = date_candidates[0]
 
-            # Try to extract domain
-            domain = 'Web'
-            if link:
+            # Source: prefer SerpAPI's 'source' field (e.g. "Reuters"), fall back to domain
+            domain = item.get('source')
+            if not domain and link:
                 try:
                     from urllib.parse import urlparse
                     domain = urlparse(link).netloc
                 except:
                     pass
+            if not domain:
+                domain = 'Web'
 
             # Timestamp parsing with better language support
             timestamp = None
@@ -993,30 +997,20 @@ def direct_search_api():
             }
 
         # Harvest results from SerpAPI response
-        # SerpAPI returns: inline_images, organic_results, image_results, 
-        # and for reverse image: image_sizes, pages_with_matching_images
+        # For image search: Google Lens returns 'exact_matches' (pages with the EXACT image)
+        # For text search: returns 'organic_results'
         
-        # Reverse image search results
-        if 'inline_images' in serpapi_data:
-            for item in serpapi_data['inline_images']:
-                items_to_process.append(parse_item(item, 'image'))
+        # Google Lens exact matches - pages where this exact image appears
+        # This is the primary source for image history/provenance
+        if 'exact_matches' in serpapi_data:
+            print(f"[*] Found {len(serpapi_data['exact_matches'])} exact matches")
+            for item in serpapi_data['exact_matches']:
+                items_to_process.append(parse_item(item, 'exact_match'))
         
-        if 'image_sizes' in serpapi_data:
-            for item in serpapi_data['image_sizes']:
-                items_to_process.append(parse_item(item, 'image'))
-
-        if 'pages_with_matching_images' in serpapi_data:
-            for item in serpapi_data['pages_with_matching_images']:
-                items_to_process.append(parse_item(item, 'organic'))
-        
-        # Organic/text search results
+        # Organic text search results
         if 'organic_results' in serpapi_data:
             for item in serpapi_data['organic_results']:
                 items_to_process.append(parse_item(item, 'organic'))
-        
-        if 'image_results' in serpapi_data:
-            for item in serpapi_data['image_results']:
-                items_to_process.append(parse_item(item, 'image'))
 
         # Remove duplicates based on link
         seen_links = set()
