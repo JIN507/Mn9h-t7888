@@ -5,6 +5,7 @@ import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
 import GradientButton from '../components/GradientButton';
 import DropZone from '../components/DropZone';
+import ErrorBanner from '../components/ErrorBanner';
 
 // Match-bucket labels (exact / similar / page mention)
 const MATCH_TYPE_LABELS = {
@@ -92,11 +93,7 @@ const Provenance = () => {
 
                 {/* Results Section */}
                 <div className="space-y-6 animate-fade-in-up delay-200">
-                    {error && (
-                        <div className="p-4 glass-card bg-red-50/80 border-red-200 text-red-700">
-                            {error}
-                        </div>
-                    )}
+                    <ErrorBanner variant="panel" message={error} />
 
                     {result && (
                         <div className="space-y-6">

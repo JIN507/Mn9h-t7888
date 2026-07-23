@@ -5,6 +5,7 @@ import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
 import GradientButton from '../components/GradientButton';
 import DropZone from '../components/DropZone';
+import ErrorBanner from '../components/ErrorBanner';
 
 // --- Components ---
 
@@ -301,12 +302,7 @@ const VideoAnalysis = () => {
             {/* Error */}
             {error && (
                 <div className="animate-fade-in-up mb-6">
-                    <GlassCard className="p-4 border-red-200">
-                        <div className="flex items-center justify-center gap-2 text-red-600 font-bold text-sm">
-                            <AlertTriangle className="w-5 h-5" />
-                            {error}
-                        </div>
-                    </GlassCard>
+                    <ErrorBanner variant="panel" message={error} className="justify-center" />
                 </div>
             )}
 

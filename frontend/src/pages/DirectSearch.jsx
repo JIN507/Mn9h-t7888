@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, Image as ImageIcon, AlertCircle } from 'lucide-react';
+import { Search, Image as ImageIcon } from 'lucide-react';
+import ErrorBanner from '../components/ErrorBanner';
 import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
 import GradientButton from '../components/GradientButton';
@@ -151,12 +152,7 @@ const DirectSearch = () => {
                 </div>
             )}
 
-            {error && (
-                <div className="p-4 mb-8 glass-card bg-red-50/80 border-red-200 text-red-700 animate-fade-in-up flex items-center">
-                    <AlertCircle className="w-5 h-5 ml-2 flex-shrink-0" />
-                    {error}
-                </div>
-            )}
+            <ErrorBanner variant="panel" message={error} className="mb-8 animate-fade-in-up" />
 
             {results && results.length > 0 && (
                 <div className="animate-fade-in-up">

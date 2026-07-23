@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, RefreshCw, Layers, Calendar, ExternalLink, AlertTriangle, ImageIcon } from 'lucide-react';
+import { Search, RefreshCw, Layers, Calendar, ExternalLink, ImageIcon } from 'lucide-react';
 import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
+import ErrorBanner from '../components/ErrorBanner';
 import GradientButton from '../components/GradientButton';
 import DropZone from '../components/DropZone';
 
@@ -243,11 +244,7 @@ const ReverseSearch = () => {
                             <h2 className="font-bold text-slate-800">محركات البحث (عكسي)</h2>
                         </div>
 
-                        {errors.engines && (
-                            <div className="p-3 bg-red-50 text-red-600 rounded-xl flex items-center gap-2 mb-4 text-sm font-bold">
-                                <AlertTriangle className="w-4 h-4" /> {errors.engines}
-                            </div>
-                        )}
+                        <ErrorBanner message={errors.engines} className="mb-4" />
 
                         {enginesResult?.imageUrl && (
                             <img src={enginesResult.imageUrl} alt="Target" className="w-full h-36 object-cover rounded-xl mb-4 border border-slate-200" />
@@ -285,11 +282,7 @@ const ReverseSearch = () => {
                             <h2 className="font-bold text-slate-800">الجدول الزمني</h2>
                         </div>
 
-                        {errors.timeline && (
-                            <div className="p-3 bg-red-50 text-red-600 rounded-xl flex items-center gap-2 mb-4 text-sm font-bold">
-                                <AlertTriangle className="w-4 h-4" /> {errors.timeline}
-                            </div>
-                        )}
+                        <ErrorBanner message={errors.timeline} className="mb-4" />
 
                         {timelineResult ? (
                             <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1" dir="ltr">

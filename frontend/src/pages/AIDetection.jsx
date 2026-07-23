@@ -1,52 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ShieldCheck, AlertTriangle, X } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
 import DropZone from '../components/DropZone';
-
-// ─── Animated Percentage Counter ────────────────────────
-const AnimatedPercentage = ({ value }) => {
-    const [count, setCount] = useState(0);
-    const target = Math.round(value * 100);
-
-    useEffect(() => {
-        let startTimestamp = null;
-        const duration = 1500;
-        const step = (timestamp) => {
-            if (!startTimestamp) startTimestamp = timestamp;
-            const progress = Math.min((timestamp - startTimestamp) / duration, 1);
-            const easeOut = progress * (2 - progress);
-            setCount(Math.floor(easeOut * target));
-            if (progress < 1) window.requestAnimationFrame(step);
-        };
-        window.requestAnimationFrame(step);
-    }, [target]);
-
-    return <span>{count}%</span>;
-};
-
-// ─── Animated Progress Bar ────────────────────────
-const AnimatedBar = ({ value, colorClass }) => {
-    const [width, setWidth] = useState(0);
-    const target = Math.round(value * 100);
-
-    useEffect(() => {
-        const timer = setTimeout(() => setWidth(target), 100);
-        return () => clearTimeout(timer);
-    }, [target]);
-
-    return (
-        <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
-            <div
-                className={`h-full ${colorClass} rounded-full transition-all ease-out relative overflow-hidden`}
-                style={{ width: `${width}%`, transitionDuration: '1500ms' }}
-            >
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer" />
-            </div>
-        </div>
-    );
-};
+import ResultCard from '../components/ResultCard';
+import ConfidenceGauge from '../components/ConfidenceGauge';
 
 // ─── Animated Scanning SVG (Light theme) ────────────────────────
 const ScanningOrb = ({ size = 160 }) => (
@@ -78,79 +37,27 @@ const ScanningOrb = ({ size = 160 }) => (
     </svg>
 );
 
-// ─── Result Card ────────────────────────
-const ResultCard = ({ result, title, error, index }) => {
+// ─── Detection Result Card (shared ResultCard + ConfidenceGauge) ──────
+const DetectionResultCard = ({ result, title, error, index }) => {
     if (error) {
-        return (
-            <GlassCard className="ai-result-card p-6 border-slate-200" style={{ animationDelay: `${index * 150}ms` }}>
-                <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-100">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-slate-100">
-                        <X className="w-5 h-5 text-slate-400" />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-slate-800">{title}</h3>
-                        <p className="text-xs text-slate-500">استجابة النظام</p>
-                    </div>
-                </div>
-                <div className="text-center py-6">
-                    <AlertTriangle className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-                    <p className="text-slate-600 text-sm font-bold">{error}</p>
-                </div>
-            </GlassCard>
-        );
+        return <ResultCard title={title} error={error}
+                           errorSubtitle="استجابة النظام" index={index} />;
     }
-
     if (!result) return null;
 
     const isAI = result.is_ai || (result.confidence_ai && result.confidence_ai > 0.5);
 
     return (
-        <GlassCard className="ai-result-card p-6 border-slate-200 shadow-sm" style={{ animationDelay: `${index * 150}ms` }}>
-            {/* Top accent bar */}
-            <div className={`absolute top-0 left-0 right-0 h-1 rounded-t-2xl ${isAI ? 'bg-gradient-to-r from-red-500 via-orange-400 to-red-500' : 'bg-gradient-to-r from-slate-800 via-slate-600 to-slate-800'}`} />
-
-            <div className="flex items-center gap-3 mb-5 pb-3 border-b border-slate-100">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${isAI ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
-                    {isAI ? <AlertTriangle className="w-5 h-5 text-red-500" /> : <ShieldCheck className="w-5 h-5 text-slate-700" />}
-                </div>
-                <div>
-                    <h3 className="font-bold text-slate-800">{title}</h3>
-                    <p className="text-xs text-slate-500">نتيجة الفحص الآلي</p>
-                </div>
-            </div>
-
-            {/* Verdict */}
-            <div className="text-center mb-6">
-                <div className={`inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-4 border-2 ${
-                    isAI
-                        ? 'bg-red-50 border-red-200 text-red-500'
-                        : 'bg-slate-50 border-slate-300 text-slate-800'
-                }`}>
-                    {isAI ? <AlertTriangle className="w-10 h-10" /> : <ShieldCheck className="w-10 h-10" />}
-                </div>
-                <h4 className={`text-xl font-black ${isAI ? 'text-red-600' : 'text-slate-800'}`}>
-                    {result.verdict}
-                </h4>
-            </div>
-
-            {/* Bars */}
-            <div className="space-y-5">
-                <div>
-                    <div className="flex justify-between text-xs font-bold mb-2">
-                        <span className="text-slate-600">التوليد الاصطناعي (AI)</span>
-                        <span className="text-slate-900 text-sm font-mono"><AnimatedPercentage value={result.confidence_ai} /></span>
-                    </div>
-                    <AnimatedBar value={result.confidence_ai} colorClass="bg-gradient-to-r from-slate-800 to-slate-600" />
-                </div>
-                <div>
-                    <div className="flex justify-between text-xs font-bold mb-2">
-                        <span className="text-slate-500">صورة حقيقية (Human)</span>
-                        <span className="text-slate-500 text-sm font-mono"><AnimatedPercentage value={result.confidence_human} /></span>
-                    </div>
-                    <AnimatedBar value={result.confidence_human} colorClass="bg-gradient-to-r from-slate-400 to-slate-300" />
-                </div>
-            </div>
-        </GlassCard>
+        <ResultCard title={title} subtitle="نتيجة الفحص الآلي" isAI={isAI}
+                    verdict={result.verdict} index={index}>
+            <ConfidenceGauge bars={[
+                { label: 'التوليد الاصطناعي (AI)', value: result.confidence_ai,
+                  colorClass: 'bg-gradient-to-r from-slate-800 to-slate-600' },
+                { label: 'صورة حقيقية (Human)', value: result.confidence_human,
+                  colorClass: 'bg-gradient-to-r from-slate-400 to-slate-300',
+                  labelClass: 'text-slate-500', valueClass: 'text-slate-500' },
+            ]} />
+        </ResultCard>
     );
 };
 
@@ -317,8 +224,8 @@ const AIDetection = () => {
 
                 {!loading && showCards && (
                     <div className="grid md:grid-cols-2 gap-6">
-                        <ResultCard result={results.thehive} error={errors.thehive} title="نتيجة الفحص الأول" index={0} />
-                        <ResultCard result={results.aiornot} error={errors.aiornot} title="نتيجة الفحص الثاني" index={1} />
+                        <DetectionResultCard result={results.thehive} error={errors.thehive} title="نتيجة الفحص الأول" index={0} />
+                        <DetectionResultCard result={results.aiornot} error={errors.aiornot} title="نتيجة الفحص الثاني" index={1} />
                     </div>
                 )}
             </div>
