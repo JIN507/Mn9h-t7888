@@ -571,70 +571,16 @@ def xai_context_api():
         if not XAI_API_KEY:
             return jsonify({'error': 'XAI_API_KEY is not configured', 'success': False}), 500
 
-        print(f"[*] Starting x.ai Context Investigation for image: {image_url}")
+        from providers.xai import investigate_image, extract_summary
 
-        payload = {
-            "model": "grok-4.20-reasoning",
-            "input": [
-                {
-                    "role": "user",
-                    "content": f"Please act as an investigative journalist. I have provided an image URL to investigate: {image_url} Search the web for context on this image (where it appeared, its origin, any controversies or truth behind it). You must use the web search tool to find information about this image. Provide a highly detailed summary in Arabic explaining the story behind this image."
-                }
-            ],
-            "tools": [
-                {
-                    "type": "web_search",
-                    "enable_image_understanding": True
-                }
-            ]
-        }
-        
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {XAI_API_KEY}"
-        }
-
-        resp = requests.post(
-            'https://api.x.ai/v1/responses', 
-            json=payload, 
-            headers=headers, 
-            timeout=180
-        )
+        resp = investigate_image(image_url)
 
         if resp.status_code != 200:
-            print(f"[!] x.ai API Error: {resp.text}")
             return jsonify({'error': f'xAI API Error: {resp.status_code}', 'details': resp.text, 'success': False}), 502
 
         xai_data = resp.json()
-        
-        # Extract the assistant's reply
-        # The Responses API usually returns the text in `message` or `output` depending on the format.
-        # Let's extract the main message content
-        message_content = ""
-        # The structure is usually {"message": {"role": "assistant", "content": "..."}} or {"choices": [...]}
-        # We will safely pull the content:
-        if 'message' in xai_data and 'content' in xai_data['message']:
-            message_content = xai_data['message']['content']
-        elif 'choices' in xai_data:
-            message_content = xai_data['choices'][0].get('message', {}).get('content', '')
-        elif 'output' in xai_data and isinstance(xai_data['output'], list):
-            # Parse the Responses API format with tools
-            texts = []
-            for item in xai_data['output']:
-                if item.get('role') == 'assistant' and item.get('type') == 'message':
-                    contents = item.get('content', [])
-                    if isinstance(contents, str):
-                        texts.append(contents)
-                    elif isinstance(contents, list):
-                        for c in contents:
-                            if c.get('type') == 'output_text':
-                                texts.append(c.get('text', ''))
-            message_content = "\n".join(texts)
+        message_content = extract_summary(xai_data)
 
-        if not message_content.strip():
-            # Fallback if structure is absolutely unknown, just dump as string
-            message_content = str(xai_data)
-        
         return jsonify({
             'success': True,
             'summary': message_content,
@@ -681,29 +627,13 @@ def direct_search_api():
         print(f"[*] Starting Zenserp search. Query: {query}, Image: {image_url}")
         
         # Zenserp Search Logic
-        headers = {'apikey': ZENSERP_API_KEY}
-        
-        if image_url:
-            # Reverse Image Search - use image_url parameter per Zenserp docs
-            params = {
-                'image_url': image_url,
-                'gl': 'us',              # Keep US for broader search, we will translate
-                'hl': 'en'               # Keep English for better source data
-            }
-            print(f"[*] Zenserp reverse image search params: {params}")
-            resp = requests.get('https://app.zenserp.com/api/v2/search', headers=headers, params=params, timeout=90)
-            
-        else:
-            # Text Search
-            params = {
-                'q': query,
-                'num': 40, # Fetch more initially, then filter
-                'gl': 'sa',
-                'hl': 'ar'
-            }
-            resp = requests.get('https://app.zenserp.com/api/v2/search', headers=headers, params=params, timeout=60)
+        from providers.zenserp import reverse_image_search, text_search
 
-        print(f"[*] Zenserp response status: {resp.status_code}")
+        if image_url:
+            # Keep US/English for broader search + better source data; we translate after
+            resp = reverse_image_search(image_url, gl='us', hl='en')
+        else:
+            resp = text_search(query, num=40, gl='sa', hl='ar')
         
         if resp.status_code != 200:
             print(f"[!] Zenserp API Error: {resp.text}")
