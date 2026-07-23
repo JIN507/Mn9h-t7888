@@ -18,12 +18,22 @@ os.environ['XAI_API_KEY'] = 'test-xai-key'
 os.environ['SIGHTENGINE_API_USER'] = 'test-se-user'
 os.environ['SIGHTENGINE_API_SECRET'] = 'test-se-secret'
 os.environ.pop('GOOGLE_APPLICATION_CREDENTIALS', None)
+os.environ['RATELIMIT_ENABLED'] = 'false'
 
 import pytest  # noqa: E402
 
 
+_tables_created = False
+
+
 def _flask_app():
+    global _tables_created
     import app as app_module
+    if not _tables_created:
+        from models import db
+        with app_module.app.app_context():
+            db.create_all()
+        _tables_created = True
     return app_module.app
 
 

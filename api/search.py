@@ -13,11 +13,14 @@ from services.media_service import UPLOAD_FOLDER, allowed_file
 from services.search_service import (search_images, scrape_reverse_search,
                                      build_direct_search_timeline)
 
+from extensions import limiter, SPEND_LIMIT
+
 logger = logging.getLogger(__name__)
 bp = Blueprint('search', __name__)
 
 
 @bp.route('/api/upload', methods=['POST'])
+@limiter.limit(SPEND_LIMIT)
 def upload_image():
     """API endpoint to upload an image"""
     if 'file' not in request.files and 'image' not in request.form:
@@ -63,6 +66,7 @@ def export_results():
     return response
 
 @bp.route('/image-source-search', methods=['POST'])
+@limiter.limit(SPEND_LIMIT)
 def image_source_search():
 
     try:
@@ -78,6 +82,7 @@ def image_source_search():
 
 # Endpoint for x.ai Contextual Image Investigation
 @bp.route('/api/xai-context', methods=['POST'])
+@limiter.limit(SPEND_LIMIT)
 def xai_context_api():
     try:
         data = request.get_json(silent=True) or {}
@@ -110,6 +115,7 @@ def xai_context_api():
         return jsonify({'error': str(e), 'success': False}), 500
 
 @bp.route('/api/direct-search', methods=['POST'])
+@limiter.limit(SPEND_LIMIT)
 def direct_search_api():
     """API endpoint for Direct Search using Zenserp"""
     try:
@@ -173,6 +179,7 @@ def direct_search_api():
         return jsonify({'error': str(e), 'success': False}), 500
 
 @bp.route('/api/image-source-search', methods=['POST'])
+@limiter.limit(SPEND_LIMIT)
 def api_image_source_search():
     """API endpoint to find image sources using TheHive.ai"""
     if 'file' not in request.files:

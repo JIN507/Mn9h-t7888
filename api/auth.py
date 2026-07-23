@@ -6,11 +6,14 @@ from flask import Blueprint, g, jsonify, request
 from auth import login_required, admin_required, generate_token
 from models import db, User, Country, Source, Keyword, Search, Analysis
 
+from extensions import limiter
+
 logger = logging.getLogger(__name__)
 bp = Blueprint('auth', __name__)
 
 
 @bp.route('/api/auth/register', methods=['POST'])
+@limiter.limit('20 per minute')
 def auth_register():
     """Register a new user"""
     try:
@@ -56,6 +59,7 @@ def auth_register():
 
 
 @bp.route('/api/auth/login', methods=['POST'])
+@limiter.limit('20 per minute')
 def auth_login():
     """Login user and return JWT token"""
     try:

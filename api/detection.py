@@ -18,11 +18,14 @@ from services.detection_service import (scrape_aiornot, scrape_thehive,
 from services.media_service import (UPLOAD_FOLDER, AUDIO_UPLOAD_FOLDER,
                                     allowed_file, allowed_audio_file)
 
+from extensions import limiter, SPEND_LIMIT
+
 logger = logging.getLogger(__name__)
 bp = Blueprint('detection', __name__)
 
 
 @bp.route('/ai-detect-thehive', methods=['POST'])
+@limiter.limit(SPEND_LIMIT)
 def ai_detect_thehive():
     try:
         image_file = request.files.get('image')
@@ -66,6 +69,7 @@ def ai_detect_thehive():
 # The updated implementation is at line ~1458
 
 @bp.route('/api/ai-detection', methods=['POST'])
+@limiter.limit(SPEND_LIMIT)
 def api_ai_detection():
     """API endpoint for AI image detection using TheHive.ai or FaceOnLive"""
     logger.info('[*] Received request to /api/ai-detection endpoint')
@@ -197,6 +201,7 @@ def api_ai_detection():
 
 @bp.route('/verify-audio', methods=['POST'])
 @bp.route('/api/verify-audio', methods=['POST'])
+@limiter.limit(SPEND_LIMIT)
 def verify_audio():
     """API endpoint to verify if audio is AI-generated using AIorNot API"""
     try:
@@ -336,6 +341,7 @@ def verify_audio():
 from providers.imgbb import upload_to_imgbb
 
 @bp.route('/api/text-detection', methods=['POST'])
+@limiter.limit(SPEND_LIMIT)
 def api_text_detection():
     """Detect AI-generated text using AIorNot API"""
     logger.info('[*] Received text detection request')
@@ -424,6 +430,7 @@ def api_text_detection():
         }), 500
 
 @bp.route('/api/analyze-video', methods=['POST'])
+@limiter.limit(SPEND_LIMIT)
 def api_analyze_video():
     """Analyze video for AI content using AIorNot API"""
     logger.info('[*] Received video analysis request')
@@ -484,6 +491,7 @@ def api_analyze_video():
 
 @bp.route('/api/faceonlive-detection', methods=['POST'])
 @bp.route('/ai-detect-faceonlive', methods=['POST'])  # Keep old route for compatibility
+@limiter.limit(SPEND_LIMIT)
 def ai_detect_faceonlive():
     """Handle image upload for FaceOnLive detection"""
     logger.info('[*] Received request to FaceOnLive detection endpoint')

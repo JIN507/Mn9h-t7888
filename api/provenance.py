@@ -5,11 +5,14 @@ from flask import Blueprint, current_app, jsonify, request
 
 from services.provenance_service import analyze_provenance
 
+from extensions import limiter, SPEND_LIMIT
+
 logger = logging.getLogger(__name__)
 bp = Blueprint('provenance', __name__)
 
 
 @bp.route('/api/provenance', methods=['POST'])
+@limiter.limit(SPEND_LIMIT)
 def api_provenance():
     """API endpoint for provenance analysis (origin & first seen)"""
     try:
