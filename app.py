@@ -2376,7 +2376,9 @@ def get_user_searches():
     offset = request.args.get('offset', 0, type=int)
     search_type = request.args.get('type')
     
-    query = Search.query.filter_by(user_id=g.current_user.id)
+    # NOTE: Search defines a `query` COLUMN which shadows Model.query —
+    # must go through db.session.query() here.
+    query = db.session.query(Search).filter_by(user_id=g.current_user.id)
     
     if search_type:
         query = query.filter_by(search_type=search_type)
