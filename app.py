@@ -1267,66 +1267,42 @@ def scrape_thehive(image_url):
     print(f'[*] Image downloaded successfully to {temp_image_path}')
     
     try:
-        # Use Sightengine API
-        print('[*] Calling Sightengine API...')
-        import requests
+        from providers.sightengine import check_genai_file, parse_genai
+        from providers.base import ProviderNotConfigured
 
-        sightengine_user = os.environ.get('SIGHTENGINE_API_USER')
-        sightengine_secret = os.environ.get('SIGHTENGINE_API_SECRET')
-        if not sightengine_user or not sightengine_secret:
+        try:
+            status_code, result = check_genai_file(temp_image_path)
+        except ProviderNotConfigured as e:
             return {
                 'rawText': 'Sightengine credentials not configured',
                 'source': 'Model-1',
-                'error': 'SIGHTENGINE_API_USER / SIGHTENGINE_API_SECRET env vars not set',
+                'error': str(e),
                 'imageUrl': image_url
             }
 
-        resp = requests.post(
-            "https://api.sightengine.com/1.0/check.json",
-            files={"media": open(temp_image_path, "rb")},
-            data={
-              "models":     "genai",
-              "api_user":   sightengine_user,
-              "api_secret": sightengine_secret
-            },
-            timeout=30
-        )
-
-        result = resp.json()
-        if resp.status_code != 200 or result.get("status") != "success":
+        if status_code != 200 or result.get("status") != "success":
             return {
-              'rawText': f"Error {resp.status_code}: {result}",
+              'rawText': f"Error {status_code}: {result}",
               'source': 'Model-1',
               'error': result,
               'imageUrl': image_url
             }
 
-        score = result['type']['ai_generated']
-        
-        # For consistency with the other model, calculate human score as inverse of AI score
-        ai_confidence = float(score)
-        human_confidence = 1.0 - ai_confidence
-        
-        # Ensure confidence values are between 0 and 1
-        ai_confidence = max(0.0, min(ai_confidence, 1.0))
-        human_confidence = max(0.0, min(human_confidence, 1.0))
-        
-        # Set verdict text based on AI score
-        is_ai = ai_confidence > 0.5
-        verdict_text = "منشأة بواسطة الذكاء الاصطناعي" if is_ai else "الصورة حقيقية (غير منشأة بالذكاء الاصطناعي)"
-        
-        # Format result to match the other function's structure for frontend compatibility
+        dr = parse_genai(result)
+        verdict_text = "منشأة بواسطة الذكاء الاصطناعي" if dr.is_ai else "الصورة حقيقية (غير منشأة بالذكاء الاصطناعي)"
+
+        # Format result to match the other model's structure for frontend compatibility
         return {
             "verdict": verdict_text,
-            "confidence_ai": ai_confidence,
-            "confidence_human": human_confidence,
-            "generator": "unknown",  # Sightengine doesn't provide generator info
+            "confidence_ai": dr.ai_confidence,
+            "confidence_human": dr.human_confidence,
+            "generator": dr.generator,
             "quality_ok": True,     # No quality info, assume OK
             "nsfw": False,          # No NSFW info
             'source': 'Model-1',
             'rawText': json.dumps(result, indent=2),
             'imageUrl': image_url,
-            'is_ai': is_ai,
+            'is_ai': dr.is_ai,
             'success': True
         }
             
