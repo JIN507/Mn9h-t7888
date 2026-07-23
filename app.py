@@ -42,10 +42,8 @@ def create_app(config_object=Config):
     register_blueprints(app)
     _register_spa(app)
 
-    # Development convenience — being replaced by Alembic migrations
-    with app.app_context():
-        db.create_all()
-
+    # Schema is managed by Alembic migrations: `flask db upgrade`
+    # (see docs/MIGRATIONS.md — no db.create_all in production paths)
     return app
 
 

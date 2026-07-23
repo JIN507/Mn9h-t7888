@@ -9,7 +9,7 @@ services:
     name: bahith-al-suwar
     env: python
     buildCommand: "./build.sh"
-    startCommand: gunicorn app:app
+    startCommand: bash -c "flask db upgrade && gunicorn app:app"
     envVars:
       # Database - auto-populated from Render Postgres
       - key: DATABASE_URL
