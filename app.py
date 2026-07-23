@@ -989,10 +989,6 @@ def verify_audio():
                 'success': False
             }), 500
         
-        # AIorNot API Key and endpoint
-        API_KEY = AIORNOT_API_KEY
-        VOICE_ENDPOINT = "https://api.aiornot.com/v1/reports/voice"
-        
         # Calculate MD5 hash for the file
         try:
             with open(audio_path, "rb") as f:
@@ -1008,68 +1004,55 @@ def verify_audio():
         
         # Send file to AIorNot API
         try:
-            print(f'[*] Sending file to AIorNot API for analysis')
-            with open(audio_path, "rb") as audio_file:
-                files = {"file": audio_file}
-                headers = {"Authorization": f"Bearer {API_KEY}"}
-                
-                # Make the API request with a 2 minute timeout as recommended
-                response = requests.post(
-                    VOICE_ENDPOINT,
-                    headers=headers,
-                    files=files,
-                    timeout=120  # 2 minute timeout as recommended
-                )
-                
-                # Check if the request was successful
-                if response.status_code != 200:
-                    error_msg = f"فشل في تحليل الصوت: {response.status_code}"
-                    try:
-                        error_details = response.json()
-                        error_msg += f" - {error_details}"
-                    except:
-                        error_msg += f" - {response.text}"
-                    
-                    print(f'[!] API error: {error_msg}')
-                    return jsonify({
-                        'error': error_msg,
-                        'success': False
-                    }), 500
-                
-                # Parse the response
-                api_response = response.json()
-                print(f'[*] API response: {api_response}')
-                
-                # Extract report data
-                report = api_response.get('report', {})
-                verdict = report.get('verdict', 'unknown')
-                confidence = report.get('confidence', 0)
-                duration = report.get('duration', 0)
-                
-                # Determine if AI generated based on verdict
-                is_ai = verdict.lower() == 'ai'
-                
-                # Format the response for our frontend
-                response_data = {
-                    'is_ai_generated': is_ai,
+            from providers.aiornot import post_voice_file
+            response = post_voice_file(audio_path)
+
+            # Check if the request was successful
+            if response.status_code != 200:
+                error_msg = f"فشل في تحليل الصوت: {response.status_code}"
+                try:
+                    error_details = response.json()
+                    error_msg += f" - {error_details}"
+                except:
+                    error_msg += f" - {response.text}"
+
+                return jsonify({
+                    'error': error_msg,
+                    'success': False
+                }), 500
+
+            # Parse the response
+            api_response = response.json()
+
+            # Extract report data
+            report = api_response.get('report', {})
+            verdict = report.get('verdict', 'unknown')
+            confidence = report.get('confidence', 0)
+            duration = report.get('duration', 0)
+
+            # Determine if AI generated based on verdict
+            is_ai = verdict.lower() == 'ai'
+
+            # Format the response for our frontend
+            response_data = {
+                'is_ai_generated': is_ai,
+                'confidence': confidence,
+                'id': api_response.get('id', str(uuid.uuid4())),
+                'created_at': api_response.get('created_at', datetime.now().isoformat()),
+                'audio_url': audio_url,
+                'file_size': file_size,
+                'md5': report.get('md5', md5_hash),
+                'duration': duration,
+                'details': {
+                    'verdict': verdict,
                     'confidence': confidence,
-                    'id': api_response.get('id', str(uuid.uuid4())),
-                    'created_at': api_response.get('created_at', datetime.now().isoformat()),
-                    'audio_url': audio_url,
-                    'file_size': file_size,
-                    'md5': report.get('md5', md5_hash),
-                    'duration': duration,
-                    'details': {
-                        'verdict': verdict,
-                        'confidence': confidence,
-                        'format': filename.split('.')[-1].upper()
-                    },
-                    'success': True
-                }
-                
-                print(f'[*] Final result to send to client: {response_data}')
-                return jsonify(response_data)
-                
+                    'format': filename.split('.')[-1].upper()
+                },
+                'success': True
+            }
+
+            return jsonify(response_data)
+
         except requests.exceptions.RequestException as req_error:
             print(f'[!] Request error: {str(req_error)}')
             return jsonify({
@@ -1136,93 +1119,37 @@ def scrape_aiornot(image_url):
                 'imageUrl': image_url
             }
         
-        # Get API key from environment variable exactly as in the example
-        API_KEY = os.environ.get('AIORNOT_API_KEY') or AIORNOT_API_KEY
-        IMAGE_ENDPOINT = "https://api.aiornot.com/v2/image/sync"
-        
-        # Simple API call exactly as in the official documentation
-        print(f'[*] Calling AI-or-Not API endpoint: {IMAGE_ENDPOINT}')
-        with open(temp_image_path, "rb") as image_file:
-            files = {"image": image_file}
-            params = {
-                "external_id": f"bahith-{uuid.uuid4().hex[:8]}"  # Optional tracking ID
+        from providers.aiornot import post_image_file, parse_image_report
+
+        resp = post_image_file(temp_image_path)
+        if resp.status_code >= 400:
+            error_msg = f"Failed to analyze image: {resp.status_code} {resp.text}"
+            return {
+                'error': error_msg,
+                'success': False,
+                'imageUrl': image_url
             }
-            
-            resp = requests.post(
-                IMAGE_ENDPOINT, 
-                headers={"Authorization": f"Bearer {API_KEY}"},
-                files=files,
-                params=params
-            )
-            
-            # Check for HTTP errors and raise them
-            try:
-                resp.raise_for_status()
-            except requests.exceptions.HTTPError as e:
-                error_msg = f"Failed to analyze image: {resp.status_code} {resp.text}"
-                print(f'[!] {error_msg}')
-                return {
-                    'error': error_msg,
-                    'success': False,
-                    'imageUrl': image_url
-                }
-        
-        # Parse the response according to v2 API structure
+
         result = resp.json()
-        print("[*] API Response received")
-        print(json.dumps(result, indent=2))
-        
-        # Extract information from new response structure
-        ai_generated_report = result.get('report', {}).get('ai_generated', {})
-        
-        # Check if AI verdict exists
-        if ai_generated_report:
-            verdict = ai_generated_report.get('verdict', '').lower()
-            is_ai_generated = (verdict == 'ai')
-            
-            # Get confidence scores
-            ai_confidence = ai_generated_report.get('ai', {}).get('confidence', 0.0)
-            human_confidence = ai_generated_report.get('human', {}).get('confidence', 0.0)
-            
-            # Get generator information
-            generators_dict = ai_generated_report.get('generator', {})
-            
-            # Find the generator with highest confidence
-            generator = 'unknown'
-            max_confidence = 0
-            for gen_name, confidence in generators_dict.items():
-                # Ensure the confidence value is a number, not a dictionary or other type
-                if isinstance(confidence, (int, float)) and confidence > max_confidence:
-                    max_confidence = confidence
-                    generator = gen_name
-                # If confidence is a dictionary (unexpected format), try to extract a usable value
-                elif isinstance(confidence, dict) and 'confidence' in confidence:
-                    conf_value = confidence.get('confidence', 0)
-                    if conf_value > max_confidence:
-                        max_confidence = conf_value
-                        generator = gen_name
-                    
-            # Set Arabic verdict
-            verdict_arabic = "منشأة بواسطة الذكاء الاصطناعي" if is_ai_generated else "الصورة حقيقية (غير منشأة بالذكاء الاصطناعي)"
-        else:
-            # Fallback to older structure or set defaults if structure is unexpected
-            is_ai_generated = False
-            ai_confidence = 0.0
-            human_confidence = 1.0
-            generator = 'unknown'
+        dr = parse_image_report(result)
+
+        if dr.verdict == 'unknown':
             verdict_arabic = "لا يمكن تحديد مصدر الصورة"
-            print("[!] Warning: Unexpected API response structure")
-        
+        elif dr.is_ai:
+            verdict_arabic = "منشأة بواسطة الذكاء الاصطناعي"
+        else:
+            verdict_arabic = "الصورة حقيقية (غير منشأة بالذكاء الاصطناعي)"
+
         # Return the simplified result format
         return {
             "verdict": verdict_arabic,
-            "confidence_ai": ai_confidence,
-            "confidence_human": human_confidence,
-            "generator": generator,
-            "generator_confidence": max_confidence,
+            "confidence_ai": dr.ai_confidence,
+            "confidence_human": dr.human_confidence,
+            "generator": dr.generator,
+            "generator_confidence": dr.generator_confidence,
             "rawText": json.dumps(result, indent=2),
             "imageUrl": image_url,
-            "is_ai": is_ai_generated,
+            "is_ai": dr.is_ai,
             "success": True,
             "source": 'AI-or-Not'
         }
@@ -1343,27 +1270,12 @@ def api_text_detection():
     aiornot_key = os.environ.get('AIORNOT_API_KEY') or AIORNOT_API_KEY
     if not aiornot_key:
         return jsonify({'error': 'مفتاح API غير متوفر', 'success': False}), 500
-    
+
     try:
-        import requests as req
-        
-        url = "https://api.aiornot.com/v2/text/sync"
-        
-        headers = {
-            'Authorization': f'Bearer {aiornot_key}'
-        }
-        
-        # Match the official Python example exactly
-        data = {'text': text_content}
-        params = {
-            'include_annotations': True
-        }
-        
-        print(f'[*] Sending text ({len(text_content)} chars) to AIorNot Text API...')
-        resp = req.post(url, headers=headers, data=data, params=params, timeout=60)
-        
-        print(f'[*] Response status: {resp.status_code}')
-        
+        from providers.aiornot import post_text
+
+        resp = post_text(text_content)
+
         if resp.status_code != 200:
             error_text = resp.text[:500]
             print(f'[!] Text API error: {error_text}')
@@ -1461,33 +1373,8 @@ def api_analyze_video():
              return jsonify({'error': 'AIorNot API Key missing', 'success': False}), 500
 
         # Call AIorNot API
-        print('[*] Calling AIorNot Video API...')
-        
-        # Using requests to post multipart/form-data
-        url = "https://api.aiornot.com/v2/video/sync"
-        # Request all relevant checks
-        # Note: 'only' param needs to be sent as multiple values with same key 'only' usually, 
-        # or list depending on how requests handles it. AIorNot docs say "Array of analysis types".
-        # Requests 'data' with list values handles this as 'only': ['val1', 'val2'] which normally sends multiple params.
-        # Let's verify standard requests behavior.
-        payload = {
-            'only': ['ai_video', 'ai_voice', 'ai_music', 'deepfake_video'] 
-        }
-        
-        # We need to open the file again for reading
-        with open(temp_path, 'rb') as f:
-            files = [
-                ('video', (file.filename, f, 'application/octet-stream'))
-            ]
-            headers = {
-                'Authorization': f'Bearer {aiornot_key}',
-                'Accept': 'application/json'
-            }
-            
-            # 120s timeout as requested
-            response = requests.post(url, headers=headers, data=payload, files=files, timeout=120)
-
-        print(f'[*] AIorNot Response Status: {response.status_code}')
+        from providers.aiornot import post_video_file
+        response = post_video_file(temp_path, file.filename)
         
         if response.status_code == 200:
             result = response.json()
