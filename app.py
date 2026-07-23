@@ -23,23 +23,6 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
 
-# Try to import Google Cloud Vision
-try:
-    from google.cloud import vision
-    VISION_API_AVAILABLE = True
-    
-    # Set credentials path if not already set
-    if not os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
-        credentials_path = os.path.join(os.path.dirname(__file__), 'google-credentials.json')
-        if os.path.exists(credentials_path):
-            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
-            print(f'[*] Google Cloud credentials set to: {credentials_path}')
-        # else:
-            # print('[!] google-credentials.json not found. Please set GOOGLE_APPLICATION_CREDENTIALS.')
-except ImportError:
-    VISION_API_AVAILABLE = False
-    print('[!] Google Cloud Vision not available. Install with: pip install google-cloud-vision')
-
 # Provenance feature imports (with fallbacks)
 try:
     from bs4 import BeautifulSoup
@@ -227,119 +210,14 @@ def search_images(image_url):
         'tineye': f"https://tineye.com/search?url={image_url}"
     }
 
-from io import BytesIO
-
-try:
-    from PIL import Image
-    PIL_AVAILABLE = True
-except Exception:
-    PIL_AVAILABLE = False
-
-import os, requests, traceback
-
-# (اختياري) إجبار IPv4 — يفيد لو الشبكة عندك تتعلّق على IPv6
-try:
-    import socket, urllib3.util.connection as urllib3_cn
-    urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
-except Exception:
-    pass
-
-# SERPAPI Key loaded from env above
+# IPv4 forcing moved to providers/base.py
 
 # Normalized match_type buckets used across providers and the frontend:
 #   'exact'      — exact copy of the image found elsewhere
 #   'similar'    — visually similar image
 #   'page_match' — page that mentions/contains a matching image
-def vision_web_detection(image_url):
-    """Google Vision Web Detection as a second reverse-search source.
-    Credentials come from GOOGLE_APPLICATION_CREDENTIALS.
-    Returns a normalized match list (empty on any failure — never raises).
-    """
-    if not VISION_API_AVAILABLE:
-        return []
-    if not os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
-        return []
-    try:
-        client = vision.ImageAnnotatorClient()
-        image = vision.Image()
-        image.source.image_uri = image_url
-        annotations = client.web_detection(image=image).web_detection
-
-        matches = []
-        for img in annotations.full_matching_images:
-            if img.url:
-                matches.append({
-                    'title': '',
-                    'link': img.url,
-                    'thumbnail': img.url,
-                    'match_type': 'exact',
-                    'provider': 'google_vision'
-                })
-        for img in annotations.partial_matching_images:
-            if img.url:
-                matches.append({
-                    'title': '',
-                    'link': img.url,
-                    'thumbnail': img.url,
-                    'match_type': 'similar',
-                    'provider': 'google_vision'
-                })
-        for page in annotations.pages_with_matching_images:
-            if page.url:
-                matches.append({
-                    'title': page.page_title or '',
-                    'link': page.url,
-                    'thumbnail': (page.full_matching_images[0].url
-                                  if page.full_matching_images else
-                                  (page.partial_matching_images[0].url
-                                   if page.partial_matching_images else None)),
-                    'match_type': 'page_match',
-                    'provider': 'google_vision'
-                })
-        print(f'[*] Vision Web Detection returned {len(matches)} matches')
-        return matches
-    except Exception as e:
-        print(f'[!] Vision Web Detection failed: {e}')
-        return []
-
-
-def _serpapi_lens_matches(image_url, lens_type):
-    """One SerpAPI Google Lens call. Harvests ONLY visual-match sections
-    (exact_matches / visual_matches) — never organic_results or inline_images.
-    """
-    params = {
-        'engine': 'google_lens',
-        'url': image_url,
-        'type': lens_type,
-        'api_key': SERPAPI_API_KEY,
-        'hl': 'ar',
-        'country': 'sa',
-    }
-    resp = requests.get('https://serpapi.com/search.json', params=params, timeout=(8, 20))
-    print(f'[*] SerpAPI google_lens type={lens_type} status={resp.status_code}')
-    if resp.status_code != 200:
-        raise requests.RequestException(f'SerpAPI HTTP {resp.status_code}: {resp.text[:200]}')
-
-    data = resp.json()
-    matches = []
-    for key, match_type in (('exact_matches', 'exact'), ('visual_matches', 'similar')):
-        val = data.get(key)
-        if not isinstance(val, list):
-            continue
-        for item in val:
-            if not isinstance(item, dict):
-                continue
-            link = item.get('link')
-            if not link:
-                continue
-            matches.append({
-                'title': item.get('title', ''),
-                'link': link,
-                'thumbnail': item.get('thumbnail') or item.get('image'),
-                'match_type': match_type,
-                'provider': 'google_lens'
-            })
-    return matches
+from providers.serpapi import lens_matches as _serpapi_lens_matches
+from providers.vision import vision_web_detection
 
 
 def scrape_reverse_search(image_url):
