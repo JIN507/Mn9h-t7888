@@ -19,7 +19,7 @@ The backend now requires environment variables for security.
    IMGBB_API_KEY=your_imgbb_key
    AIORNOT_API_KEY=your_aiornot_key
    SERPAPI_API_KEY=your_serpapi_key
-   ZENSERP_API_KEY=dc270410-8660-11f0-bccb-fb3d50c822e4
+   ZENSERP_API_KEY=your_zenserp_key
    ```
 3. Install dependencies (if not already installed):
    ```bash

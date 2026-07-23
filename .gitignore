@@ -40,6 +40,19 @@ Thumbs.db
 
 # Environment files
 .env
+.env.*
+!.env.example
+
+# Credentials — never commit service-account keys or API credentials
+google-credentials.json
+nskl.json
+*credentials*.json
+*service-account*.json
+*service_account*.json
+
+# Frontend build artifacts and dependencies
+frontend/node_modules/
+frontend/dist/
 
 # User files storage
 user_files/

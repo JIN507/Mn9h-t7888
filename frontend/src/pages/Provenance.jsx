@@ -6,6 +6,13 @@ import GlassCard from '../components/GlassCard';
 import GradientButton from '../components/GradientButton';
 import DropZone from '../components/DropZone';
 
+// Match-bucket labels (exact / similar / page mention)
+const MATCH_TYPE_LABELS = {
+    exact: { text: 'مطابقة تامة', cls: 'bg-emerald-100 text-emerald-700' },
+    similar: { text: 'صورة مشابهة', cls: 'bg-sky-100 text-sky-700' },
+    page_match: { text: 'ذكر في صفحة', cls: 'bg-amber-100 text-amber-700' },
+};
+
 const Provenance = () => {
     const location = useLocation();
     const [file, setFile] = useState(null);
@@ -101,7 +108,14 @@ const Provenance = () => {
                                 </h3>
                                 {result.first_seen ? (
                                     <div className="bg-gradient-to-br from-emerald-50 to-green-50 border border-green-200 rounded-xl p-4">
-                                        <p className="font-black text-green-800 text-lg mb-1">{result.first_seen.date}</p>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <p className="font-black text-green-800 text-lg">{result.first_seen.date}</p>
+                                            {MATCH_TYPE_LABELS[result.first_seen.match_type] && (
+                                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${MATCH_TYPE_LABELS[result.first_seen.match_type].cls}`}>
+                                                    {MATCH_TYPE_LABELS[result.first_seen.match_type].text}
+                                                </span>
+                                            )}
+                                        </div>
                                         <p className="text-green-700 text-sm mb-3 flex items-center">
                                             <MapPin className="w-4 h-4 ml-1" />
                                             {result.first_seen.domain}
@@ -139,6 +153,11 @@ const Provenance = () => {
                                                     <span className="text-xs font-bold text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full">
                                                         {item.timestamp ? item.timestamp.split('T')[0] : 'تاريخ غير معروف'}
                                                     </span>
+                                                    {MATCH_TYPE_LABELS[item.match_type] && (
+                                                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full mr-1.5 ${MATCH_TYPE_LABELS[item.match_type].cls}`}>
+                                                            {MATCH_TYPE_LABELS[item.match_type].text}
+                                                        </span>
+                                                    )}
                                                     <h4 className="font-bold text-sm mt-2 mb-0.5 text-slate-900">{item.domain}</h4>
                                                     <a
                                                         href={item.url}

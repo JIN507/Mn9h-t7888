@@ -1,32 +1,27 @@
-import os, time, traceback, requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import os
 import sys
 import re
 import json
-import uuid
 import time
+import uuid
 import base64
 import hashlib
+import io
 import requests
 import traceback
-import random
+import concurrent.futures
 
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from datetime import datetime
 from urllib.parse import urlencode, quote_plus
 import cv2
 import numpy as np
 from PIL import Image
-import io
 from flask import Flask, render_template, request, url_for, redirect, flash, jsonify, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
-from datetime import datetime
-import uuid
-import urllib.request
-import asyncio
-import hashlib
 
 # Try to import Google Cloud Vision
 try:
@@ -45,12 +40,6 @@ except ImportError:
     VISION_API_AVAILABLE = False
     print('[!] Google Cloud Vision not available. Install with: pip install google-cloud-vision')
 
-# Import requests for direct API calls
-import traceback
-
-# AI Detection imports
-from playwright.sync_api import sync_playwright
-
 # Provenance feature imports (with fallbacks)
 try:
     from bs4 import BeautifulSoup
@@ -64,17 +53,20 @@ try:
 except ImportError:
     DATEPARSER_AVAILABLE = False
 
-import concurrent.futures
-
-# Initialize Flask
 # Initialize Flask
 # Serve static files from 'frontend/dist/assets' available at '/assets'
 # Serve templates (index.html) from 'frontend/dist'
 app = Flask(__name__, static_folder='frontend/dist/assets', static_url_path='/assets', template_folder='frontend/dist')
-CORS(app)
 
 # Load environment variables
 load_dotenv()
+
+# CORS: comma-separated allowlist via CORS_ORIGINS; defaults cover local dev only
+_cors_origins = [o.strip() for o in os.environ.get(
+    'CORS_ORIGINS',
+    'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5000,http://127.0.0.1:5000'
+).split(',') if o.strip()]
+CORS(app, origins=_cors_origins)
 
 # =============================================================================
 # DATABASE CONFIGURATION
@@ -214,29 +206,11 @@ def extract_frames_from_video(video_path, frame_interval):
         print(f"Error extracting frames: {str(e)}")
         return []
 
-def download_image(url, path):
-    try:
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, 'wb') as f:
-                f.write(response.content)
-            print(f"[*] Image downloaded to: {path}")
-            return True
-        else:
-            print(f"[!] Failed to download image: HTTP {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"[!] Error downloading image: {str(e)}")
-        return False
-
 # Free transcription via Google Web Speech API
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-EXTENSION_PATH = os.path.join(BASE_DIR, "yescaptcha-extension")
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
-USER_DATA_DIR = os.path.join(BASE_DIR, "user-data")
 
 
 
@@ -272,132 +246,157 @@ except Exception:
 
 # SERPAPI Key loaded from env above
 
-def scrape_reverse_search(image_url):
+# Normalized match_type buckets used across providers and the frontend:
+#   'exact'      — exact copy of the image found elsewhere
+#   'similar'    — visually similar image
+#   'page_match' — page that mentions/contains a matching image
+def vision_web_detection(image_url):
+    """Google Vision Web Detection as a second reverse-search source.
+    Credentials come from GOOGLE_APPLICATION_CREDENTIALS.
+    Returns a normalized match list (empty on any failure — never raises).
     """
-    Drop-in replacement: uses SerpAPI Google Reverse Image only.
-    Keeps the same return structure your app expects.
+    if not VISION_API_AVAILABLE:
+        return []
+    if not os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
+        return []
+    try:
+        client = vision.ImageAnnotatorClient()
+        image = vision.Image()
+        image.source.image_uri = image_url
+        annotations = client.web_detection(image=image).web_detection
+
+        matches = []
+        for img in annotations.full_matching_images:
+            if img.url:
+                matches.append({
+                    'title': '',
+                    'link': img.url,
+                    'thumbnail': img.url,
+                    'match_type': 'exact',
+                    'provider': 'google_vision'
+                })
+        for img in annotations.partial_matching_images:
+            if img.url:
+                matches.append({
+                    'title': '',
+                    'link': img.url,
+                    'thumbnail': img.url,
+                    'match_type': 'similar',
+                    'provider': 'google_vision'
+                })
+        for page in annotations.pages_with_matching_images:
+            if page.url:
+                matches.append({
+                    'title': page.page_title or '',
+                    'link': page.url,
+                    'thumbnail': (page.full_matching_images[0].url
+                                  if page.full_matching_images else
+                                  (page.partial_matching_images[0].url
+                                   if page.partial_matching_images else None)),
+                    'match_type': 'page_match',
+                    'provider': 'google_vision'
+                })
+        print(f'[*] Vision Web Detection returned {len(matches)} matches')
+        return matches
+    except Exception as e:
+        print(f'[!] Vision Web Detection failed: {e}')
+        return []
+
+
+def _serpapi_lens_matches(image_url, lens_type):
+    """One SerpAPI Google Lens call. Harvests ONLY visual-match sections
+    (exact_matches / visual_matches) — never organic_results or inline_images.
+    """
+    params = {
+        'engine': 'google_lens',
+        'url': image_url,
+        'type': lens_type,
+        'api_key': SERPAPI_API_KEY,
+        'hl': 'ar',
+        'country': 'sa',
+    }
+    resp = requests.get('https://serpapi.com/search.json', params=params, timeout=(8, 20))
+    print(f'[*] SerpAPI google_lens type={lens_type} status={resp.status_code}')
+    if resp.status_code != 200:
+        raise requests.RequestException(f'SerpAPI HTTP {resp.status_code}: {resp.text[:200]}')
+
+    data = resp.json()
+    matches = []
+    for key, match_type in (('exact_matches', 'exact'), ('visual_matches', 'similar')):
+        val = data.get(key)
+        if not isinstance(val, list):
+            continue
+        for item in val:
+            if not isinstance(item, dict):
+                continue
+            link = item.get('link')
+            if not link:
+                continue
+            matches.append({
+                'title': item.get('title', ''),
+                'link': link,
+                'thumbnail': item.get('thumbnail') or item.get('image'),
+                'match_type': match_type,
+                'provider': 'google_lens'
+            })
+    return matches
+
+
+def scrape_reverse_search(image_url):
+    """Reverse image search: SerpAPI Google Lens (exact + visual matches)
+    merged with Google Vision Web Detection. Visual-match sections only.
+    Keeps the same return structure the app expects ('links'), plus a
+    normalized 'matches' list where every result is tagged exact|similar|page_match.
     """
     try:
-        print(f'[*] Starting reverse image search (SerpAPI) for: {image_url}')
+        print(f'[*] Starting reverse image search (Google Lens + Vision) for: {image_url}')
         # keep your existing manual search links helper
         search_links = search_images(image_url)
 
-        params = {
-            'engine': 'google_reverse_image',
-            'image_url': image_url,
-            'api_key': SERPAPI_API_KEY,
-            'device': 'desktop',
-            'google_domain': 'google.com',  # change to 'google.com.sa' if you prefer
-            'gl': 'sa',
-            'hl': 'ar',
+        matches = []
+        errors = []
+        for lens_type in ('exact_matches', 'visual_matches'):
+            try:
+                matches.extend(_serpapi_lens_matches(image_url, lens_type))
+            except requests.exceptions.Timeout as e:
+                errors.append(f'SerpAPI timeout ({lens_type}): {e}')
+            except requests.RequestException as e:
+                traceback.print_exc()
+                errors.append(f'SerpAPI failed ({lens_type}): {e}')
+
+        # Second source: Google Vision Web Detection (never raises)
+        matches.extend(vision_web_detection(image_url))
+
+        # De-duplicate by link, preserving order; 'exact' wins over weaker buckets
+        rank = {'exact': 0, 'similar': 1, 'page_match': 2}
+        by_link = {}
+        for m in matches:
+            prev = by_link.get(m['link'])
+            if prev is None or rank[m['match_type']] < rank[prev['match_type']]:
+                by_link[m['link']] = m
+        uniq_matches = list(by_link.values())
+        uniq_matches.sort(key=lambda m: rank[m['match_type']])
+
+        result = {
+            'links': [m['link'] for m in uniq_matches],
+            'matches': uniq_matches,
+            'search_urls': search_links,
+            'source': 'Google Lens + Vision',
+            'success': True
         }
-
-        try:
-            resp = requests.get('https://serpapi.com/search.json', params=params, timeout=(8, 20))
-            print(f'[*] SerpAPI status={resp.status_code}')
-            if resp.status_code != 200:
-                return {
-                    'links': [],
-                    'search_urls': search_links,
-                    'source': 'SerpAPI',
-                    'error': f'SerpAPI HTTP {resp.status_code}: {resp.text[:200]}',
-                    'success': True
-                }
-
-            data = resp.json()
-
-            # collect candidate links from common fields
-            buckets = []
-            for key in ('image_results', 'inline_images', 'visual_matches', 'organic_results'):
-                val = data.get(key)
-                if isinstance(val, list):
-                    buckets.extend(val)
-
-            links = []
-            for item in buckets:
-                if not isinstance(item, dict):
-                    continue
-                url = item.get('link') or item.get('source') or item.get('original') or item.get('image')
-                if url:
-                    links.append(url)
-
-            # de-duplicate while preserving order
-            seen, uniq = set(), []
-            for u in links:
-                if u not in seen:
-                    seen.add(u)
-                    uniq.append(u)
-
-            return {
-                'links': uniq,
-                'search_urls': search_links,
-                'source': 'SerpAPI',
-                'success': True
-            }
-
-        except requests.exceptions.Timeout as e:
-            return {
-                'links': [],
-                'search_urls': search_links,
-                'source': 'Search Engine Links (Timeout)',
-                'error': f'SerpAPI timeout: {e}',
-                'success': True
-            }
-        except requests.RequestException as e:
-            traceback.print_exc()
-            return {
-                'links': [],
-                'search_urls': search_links,
-                'source': 'Search Engine Links (API Failed)',
-                'error': str(e),
-                'success': True
-            }
+        if errors and not uniq_matches:
+            result['error'] = '; '.join(errors)
+        return result
 
     except Exception as e:
         traceback.print_exc()
         return {
             'links': [],
+            'matches': [],
             'search_urls': {},
             'error': str(e),
             'success': False
         }
-def extract_frames(video_file, frame_interval=2):
-    """Extract frames from video file at specified time intervals"""
-    video = cv2.VideoCapture(video_file)
-    total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = video.get(cv2.CAP_PROP_FPS)
-    duration = total_frames / fps
-    
-    # Convert time interval to frame interval
-    frame_step = int(frame_interval * fps)
-    if frame_step < 1:
-        frame_step = 1  # Ensure minimum step of at least 1 frame
-    
-    # Calculate frame indices based on time interval
-    frame_indices = []
-    current_frame = 0
-    while current_frame < total_frames:
-        frame_indices.append(current_frame)
-        current_frame += frame_step
-    
-    frames = []
-    for idx in frame_indices:
-        video.set(cv2.CAP_PROP_POS_FRAMES, idx)
-        success, frame = video.read()
-        if success:
-            _, buffer = cv2.imencode('.jpg', frame)
-            img_str = base64.b64encode(buffer).decode('utf-8')
-            frames.append({
-                'data': f"data:image/jpeg;base64,{img_str}",
-                'timestamp': idx / fps  # Time in seconds
-            })
-    
-    video.release()
-    return frames
-
-
-
-
 
 @app.route('/api/extract-frames', methods=['POST'])
 def extract_frames_api():
@@ -528,36 +527,6 @@ def upload_image():
         'timestamp': datetime.now().isoformat()
     })
 
-@app.route('/api/extract-frames', methods=['POST'])
-def extract_video_frames():
-    """API endpoint to extract frames from video using time interval"""
-    if 'file' not in request.files:
-        return jsonify({'error': 'No video file provided'}), 400
-
-    file = request.files['file']
-    if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
-    filename = secure_filename(file.filename)
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    file.save(filepath)
-
-    try:
-        frame_interval = float(request.form.get('frameInterval', 2))
-        frames = extract_frames(filepath, frame_interval)
-        os.remove(filepath)
-        return jsonify({
-            'frames': frames,
-            'totalFrames': len(frames)
-        })
-    except Exception as e:
-        app.logger.error(f"Frame extraction error: {str(e)}")
-        if os.path.exists(filepath):
-            os.remove(filepath)
-            return jsonify({'error': str(e)}), 500
-
-
-
-
 @app.route('/api/export', methods=['POST'])
 def export_results():
     """Export search results as JSON"""
@@ -658,13 +627,10 @@ def api_ai_detection():
             # Add a print statement to verify we're calling the scraper
             print('[DEBUG] About to call FaceOnLive scraper with path:', temp_path)
             
-            # Force browser visibility
-            os.environ['PLAYWRIGHT_FORCE_VISIBLE'] = '1'
-            
             # Explicitly wait to give time to debug
             print('[DEBUG] Waiting 2 seconds before starting scraper...')
             time.sleep(2)
-            
+
             result = scrape_faceonlive(temp_path)
             print('[DEBUG] FaceOnLive scraper returned:', result)
             
@@ -950,24 +916,33 @@ def direct_search_api():
                 'type': source_type
             }
 
-        # Harvest results from all sections
-        sections_to_check = [
-            ('reverse_image_results', ['organic', 'pages_with_matching_images']),
-            ('organic', None),
-            ('image_results', None)
-        ]
-        
+        # Harvest results.
+        # Image mode: visual-match sections ONLY — Zenserp's 'organic' (and
+        # reverse_image_results.organic) are text SERP results, NOT image
+        # matches, and were the main source of unrelated results.
+        # Text mode: 'organic' is a legitimate text search result.
+        if image_url:
+            sections_to_check = [
+                ('reverse_image_results', {'similar_images': 'similar',
+                                           'pages_with_matching_images': 'page_match'}),
+            ]
+        else:
+            sections_to_check = [
+                ('organic', None),
+                ('image_results', None),
+            ]
+
         for section, subsections in sections_to_check:
             if section in zenserp_data:
                 data_section = zenserp_data[section]
-                
+
                 # Handle nested structure (reverse_image_results)
                 if subsections and isinstance(data_section, dict):
-                    for sub in subsections:
+                    for sub, match_type in subsections.items():
                         if sub in data_section and data_section[sub]:
                             for item in data_section[sub]:
-                                items_to_process.append(parse_item(item, 'organic'))
-                
+                                items_to_process.append(parse_item(item, match_type))
+
                 # Handle list structure (organic, image_results)
                 elif isinstance(data_section, list):
                      for item in data_section:
@@ -1509,13 +1484,23 @@ def scrape_thehive(image_url):
         print('[*] Calling Sightengine API...')
         import requests
 
+        sightengine_user = os.environ.get('SIGHTENGINE_API_USER')
+        sightengine_secret = os.environ.get('SIGHTENGINE_API_SECRET')
+        if not sightengine_user or not sightengine_secret:
+            return {
+                'rawText': 'Sightengine credentials not configured',
+                'source': 'Model-1',
+                'error': 'SIGHTENGINE_API_USER / SIGHTENGINE_API_SECRET env vars not set',
+                'imageUrl': image_url
+            }
+
         resp = requests.post(
             "https://api.sightengine.com/1.0/check.json",
             files={"media": open(temp_image_path, "rb")},
             data={
-              "models":    "genai",
-              "api_user":  "1797817014",
-              "api_secret":"A4Y8VjQbRGgRsxwDSkMCQSh3tU4VTTcG"
+              "models":     "genai",
+              "api_user":   sightengine_user,
+              "api_secret": sightengine_secret
             },
             timeout=30
         )
@@ -1869,140 +1854,67 @@ def api_provenance():
             }), 200
 
         try:
-            print(f'[*] Calling SerpAPI for reverse image search: {image_url}')
-            
-            # SerpAPI parameters for Google Reverse Image Search
-            params = {
-                'engine': 'google_reverse_image',
-                'image_url': image_url,
-                'api_key': serpapi_key,
-                'hl': 'en',
-                'gl': 'us'
-            }
-            
-            response = requests.get('https://serpapi.com/search.json', params=params, timeout=30)
-            
-            if response.status_code != 200:
-                print(f'[!] SerpAPI error: {response.status_code}')
-                return jsonify({
-                    'first_seen': None,
-                    'timeline': [],
-                    'related_images': [],
-                    'stats': {'checked': 0, 'with_dates': 0},
-                    'note': f'SerpAPI error: {response.status_code}'
-                }), 200
-            
-            serp_data = response.json()
-            print(f'[*] SerpAPI response received')
-            
-            # Check for errors in response
-            if 'error' in serp_data:
-                print(f'[!] SerpAPI error: {serp_data["error"]}')
-                return jsonify({
-                    'first_seen': None,
-                    'timeline': [],
-                    'related_images': [],
-                    'stats': {'checked': 0, 'with_dates': 0},
-                    'note': f'SerpAPI error: {serp_data.get("error")}'
-                }), 200
+            print(f'[*] Calling SerpAPI Google Lens for reverse image search: {image_url}')
 
-            # Collect candidate links and related images from SerpAPI response
-            candidate_urls = []
-            related_images = []
-            
             from urllib.parse import urlparse
-            
-            # Process image results for related images gallery
-            image_results = serp_data.get('image_results', [])
-            print(f'[*] Found {len(image_results)} image results')
-            
-            for img in image_results[:30]:  # Limit to 30 images
-                if isinstance(img, dict):
-                    thumbnail = img.get('thumbnail')
-                    original = img.get('original')
-                    source_url = img.get('source')
-                    link = img.get('link')
-                    position = img.get('position', '')
-                    title = img.get('title', '')
-                    
-                    # Add link to candidate URLs for timeline
-                    if link and link.startswith('http'):
-                        candidate_urls.append(link)
-                    
-                    if thumbnail or original:
-                        # Extract source domain from link (the page URL where image was found)
-                        if link:
-                            try:
-                                parsed = urlparse(link)
-                                source_domain = parsed.netloc or 'مصدر غير معروف'
-                            except:
-                                source_domain = 'مصدر غير معروف'
-                        else:
-                            source_domain = 'مصدر غير معروف'
-                        
-                        related_images.append({
-                            'thumbnail': thumbnail or original,
-                            'original': original or thumbnail,
-                            'link': link or source_url or original,
-                            'source': source_domain,
-                            'title': title
-                        })
-            
-            # Process inline images
-            inline_images = serp_data.get('inline_images', [])
-            print(f'[*] Found {len(inline_images)} inline images')
-            
-            for img in inline_images[:20]:  # Limit to 20
-                if isinstance(img, dict):
-                    thumbnail = img.get('thumbnail')
-                    original = img.get('original')
-                    link = img.get('link')
-                    source_url = img.get('source')
-                    title = img.get('title', '')
-                    
-                    # Add link to candidate URLs for timeline
-                    if link and link.startswith('http'):
-                        candidate_urls.append(link)
-                    
-                    if thumbnail or original:
-                        # Avoid duplicates
-                        if not any(ri['original'] == (original or thumbnail) for ri in related_images):
-                            # Extract source domain
-                            if link:
-                                try:
-                                    parsed = urlparse(link)
-                                    source_domain = parsed.netloc or 'مصدر غير معروف'
-                                except:
-                                    source_domain = 'مصدر غير معروف'
-                            else:
-                                source_domain = 'مصدر غير معروف'
-                            
-                            related_images.append({
-                                'thumbnail': thumbnail or original,
-                                'original': original or thumbnail,
-                                'link': link or source_url or original,
-                                'source': source_domain,
-                                'title': title
-                            })
-            
-            # Get URLs from visual matches and organic results
-            for key in ['visual_matches', 'organic_results']:
-                items = serp_data.get(key, [])
-                print(f'[*] Found {len(items)} {key}')
-                
-                for item in items:
-                    if isinstance(item, dict):
-                        url = item.get('link') or item.get('url')
-                        if url and url.startswith('http'):
-                            candidate_urls.append(url)
 
-            # De-duplicate URLs while preserving order, limit to ~18 URLs
-            seen = set()
-            unique_urls = []
-            for url in candidate_urls:
-                if url not in seen and len(unique_urls) < 18:
-                    seen.add(url)
-                    unique_urls.append(url)
+            # Harvest ONLY visual-match sections via Google Lens (exact +
+            # visual matches), merged with Vision Web Detection — never
+            # organic_results / inline_images (they are not image matches).
+            matches = []
+            lens_errors = []
+            for lens_type in ('exact_matches', 'visual_matches'):
+                try:
+                    matches.extend(_serpapi_lens_matches(image_url, lens_type))
+                except requests.exceptions.Timeout:
+                    lens_errors.append(f'timeout:{lens_type}')
+                except requests.RequestException as e:
+                    print(f'[!] SerpAPI Lens error ({lens_type}): {e}')
+                    lens_errors.append(f'error:{lens_type}')
+
+            matches.extend(vision_web_detection(image_url))
+
+            if not matches and len(lens_errors) == 2:
+                return jsonify({
+                    'first_seen': None,
+                    'timeline': [],
+                    'related_images': [],
+                    'stats': {'checked': 0, 'with_dates': 0},
+                    'note': f'SerpAPI error: {", ".join(lens_errors)}'
+                }), 200
+
+            # Build related-images gallery and tagged candidate URLs
+            related_images = []
+            match_type_by_url = {}
+            candidate_urls = []
+
+            for m in matches:
+                link = m.get('link')
+                if not (link and link.startswith('http')):
+                    continue
+                if link not in match_type_by_url:
+                    match_type_by_url[link] = m['match_type']
+                    candidate_urls.append(link)
+
+                if m.get('thumbnail'):
+                    try:
+                        source_domain = urlparse(link).netloc or 'مصدر غير معروف'
+                    except:
+                        source_domain = 'مصدر غير معروف'
+                    if not any(ri['original'] == m['thumbnail'] for ri in related_images):
+                        related_images.append({
+                            'thumbnail': m['thumbnail'],
+                            'original': m['thumbnail'],
+                            'link': link,
+                            'source': source_domain,
+                            'title': m.get('title', ''),
+                            'match_type': m['match_type']
+                        })
+
+            # Exact matches first, then similar, then page mentions; cap at 18
+            rank = {'exact': 0, 'similar': 1, 'page_match': 2}
+            candidate_urls.sort(key=lambda u: rank[match_type_by_url[u]])
+            unique_urls = candidate_urls[:18]
             
             print(f'[*] Found {len(candidate_urls)} total URLs, {len(unique_urls)} unique URLs')
             print(f'[*] Found {len(related_images)} related images')
@@ -2014,6 +1926,10 @@ def api_provenance():
             print(f'[*] Processing {len(unique_urls)} URLs for provenance...')
             timeline_results = process_urls_for_provenance(unique_urls)
             print(f'[*] Processed {len(timeline_results)} timeline results')
+
+            # Tag each timeline entry with its match bucket (exact|similar|page_match)
+            for item in timeline_results:
+                item['match_type'] = match_type_by_url.get(item.get('url'))
 
             # Sort timeline by date (OLDEST FIRST → NEWEST LAST, then undated items)
             dated_items = [item for item in timeline_results if item.get('published_at')]

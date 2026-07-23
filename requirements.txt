@@ -25,6 +25,5 @@ deep-translator>=1.11.4
 dateparser>=1.2.0
 
 # تحليل الويب والأتمتة (Scraping)
-playwright>=1.35.0
 beautifulsoup4>=4.12.2
 python-magic>=0.4.27

@@ -6,6 +6,13 @@ import GlassCard from '../components/GlassCard';
 import GradientButton from '../components/GradientButton';
 import DropZone from '../components/DropZone';
 
+// Match-bucket labels (exact / similar / page mention)
+const MATCH_TYPE_LABELS = {
+    exact: { text: 'مطابقة تامة', cls: 'bg-emerald-100 text-emerald-700' },
+    similar: { text: 'صورة مشابهة', cls: 'bg-sky-100 text-sky-700' },
+    page_match: { text: 'ذكر في صفحة', cls: 'bg-amber-100 text-amber-700' },
+};
+
 const ReverseSearch = () => {
     const location = useLocation();
     const [file, setFile] = useState(null);
@@ -288,7 +295,14 @@ const ReverseSearch = () => {
                             <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1" dir="ltr">
                                 {timelineResult.map((item, idx) => (
                                     <div key={idx} className="bg-white p-3 rounded-xl border border-slate-200 text-left">
-                                        <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md">{item.date_found}</span>
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                            <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md">{item.date_found}</span>
+                                            {MATCH_TYPE_LABELS[item.type] && (
+                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${MATCH_TYPE_LABELS[item.type].cls}`}>
+                                                    {MATCH_TYPE_LABELS[item.type].text}
+                                                </span>
+                                            )}
+                                        </div>
                                         <h4 className="font-bold text-xs text-slate-800 mt-2 mb-1 line-clamp-2" dir="rtl">{item.title}</h4>
                                         <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-600 hover:text-blue-800 break-all line-clamp-1">{item.link}</a>
                                     </div>

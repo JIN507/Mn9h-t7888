@@ -5,9 +5,6 @@ set -o errexit
 echo "Installing Python dependencies..."
 pip install -r requirements.txt
 
-echo "Installing Playwright Browsers..."
-python -m playwright install chromium
-
 echo "Installing Node.js..."
 # Install Node.js
 export NODE_VERSION=20.10.0
