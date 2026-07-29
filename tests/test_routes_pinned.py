@@ -178,8 +178,18 @@ def test_verify_audio(client):
     assert d['details']['format'] == 'MP3'
 
 
+def _finished_job(client, response):
+    """Follow the 202 job contract to the finished result."""
+    assert response.status_code == 202
+    body = response.get_json()
+    assert body['success'] is True and body['job_id']
+    state = client.get(body['status_url']).get_json()
+    assert state['status'] == 'finished', state
+    return state['result']
+
+
 @responses.activate
-def test_analyze_video_passthrough(client):
+def test_analyze_video_job(client):
     payload = {'id': 'v1', 'report': {'ai_video': {'verdict': 'human'}}}
     responses.add(responses.POST, 'https://api.aiornot.com/v2/video/sync',
                   json=payload, status=200)
@@ -187,9 +197,29 @@ def test_analyze_video_passthrough(client):
     r = client.post('/api/analyze-video', data={
         'file': (io.BytesIO(b'fake-video-bytes'), 'clip.mp4'),
     }, content_type='multipart/form-data')
-    d = r.get_json()
-    assert r.status_code == 200
-    assert d == {'success': True, 'data': payload}
+    result = _finished_job(client, r)
+    assert result['status'] == 200
+    assert result['payload'] == {'success': True, 'data': payload}
+
+
+@responses.activate
+def test_job_sse_stream(client):
+    payload = {'id': 'v2', 'report': {'ai_video': {'verdict': 'ai'}}}
+    responses.add(responses.POST, 'https://api.aiornot.com/v2/video/sync',
+                  json=payload, status=200)
+    r = client.post('/api/analyze-video', data={
+        'file': (io.BytesIO(b'fake-video-bytes'), 'clip2.mp4'),
+    }, content_type='multipart/form-data')
+    events_url = r.get_json()['events_url']
+
+    sse = client.get(events_url)
+    assert sse.status_code == 200
+    assert sse.mimetype == 'text/event-stream'
+    text = sse.get_data(as_text=True)
+    assert 'event: result' in text
+    assert '"success": true' in text
+
+    assert client.get('/api/jobs/nonexistent-id').status_code == 404
 
 
 # ---------------------------------------------------------------- search
@@ -269,7 +299,7 @@ def test_image_source_search_lens_harvest(client, png_bytes):
 
 
 @responses.activate
-def test_xai_context_parses_responses_output(client):
+def test_xai_context_job(client):
     responses.add(
         responses.POST, 'https://api.x.ai/v1/responses',
         json={'output': [
@@ -278,10 +308,10 @@ def test_xai_context_parses_responses_output(client):
         ]}, status=200)
 
     r = client.post('/api/xai-context', json={'image_url': HOSTED_IMG})
-    d = r.get_json()
-    assert r.status_code == 200
-    assert d['success'] is True
-    assert d['summary'] == 'خلاصة التحقيق'
+    result = _finished_job(client, r)
+    assert result['status'] == 200
+    assert result['payload']['success'] is True
+    assert result['payload']['summary'] == 'خلاصة التحقيق'
 
 
 # ---------------------------------------------------------------- provenance
@@ -301,8 +331,9 @@ def test_provenance_tags_timeline(client):
     # page fetches during provenance processing fail fast under responses,
     # which still yields (undated) timeline entries — good enough to pin tags
     r = client.post('/api/provenance', json={'image_url': HOSTED_IMG})
-    d = r.get_json()
-    assert r.status_code == 200
+    result = _finished_job(client, r)
+    assert result['status'] == 200
+    d = result['payload']
     types = {i['url']: i['match_type'] for i in d['timeline']}
     assert types == {'https://exact.example/p': 'exact',
                      'https://similar.example/p': 'similar'}

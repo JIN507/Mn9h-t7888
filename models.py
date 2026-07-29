@@ -172,12 +172,14 @@ class Search(db.Model):
     __tablename__ = 'searches'
     
     id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
+    # nullable: anonymous searches are persisted too (cache + spend dedup)
     user_id = db.Column(db.String(36), db.ForeignKey('users.id', ondelete='CASCADE'),
-                        nullable=False, index=True)
+                        nullable=True, index=True)
     search_type = db.Column(db.String(30), nullable=False, index=True)  # direct, reverse, provenance
     query = db.Column(db.Text)
     image_url = db.Column(db.String(500))
-    image_hash = db.Column(db.String(64), index=True)
+    image_hash = db.Column(db.String(64), index=True)   # SHA-256 of the query image
+    image_phash = db.Column(db.String(32), index=True)  # perceptual hash (near-dup lookup)
     result_count = db.Column(db.Integer, default=0)
     processing_time_ms = db.Column(db.Float)
     raw_response = db.Column(db.JSON)
@@ -243,12 +245,14 @@ class Analysis(db.Model):
     __tablename__ = 'analyses'
     
     id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
+    # nullable: anonymous analyses are persisted too (cache + spend dedup)
     user_id = db.Column(db.String(36), db.ForeignKey('users.id', ondelete='CASCADE'),
-                        nullable=False, index=True)
-    analysis_type = db.Column(db.String(30), nullable=False, index=True)  # ai_image, ai_audio, deepfake, video
+                        nullable=True, index=True)
+    analysis_type = db.Column(db.String(30), nullable=False, index=True)  # ai_image, ai_audio, ai_text, video
     service = db.Column(db.String(50), nullable=False, index=True)  # thehive, aiornot, sightengine
     media_url = db.Column(db.String(500))
-    media_hash = db.Column(db.String(64), index=True)
+    media_hash = db.Column(db.String(64), index=True)   # SHA-256 of the media
+    media_phash = db.Column(db.String(32), index=True)  # perceptual hash (images)
     is_ai_generated = db.Column(db.Boolean, index=True)
     confidence_ai = db.Column(db.Float)
     confidence_human = db.Column(db.Float)
@@ -305,6 +309,34 @@ class AnalysisFrame(db.Model):
             'is_ai_generated': self.is_ai_generated,
             'confidence': self.confidence,
             'detection_result': self.detection_result
+        }
+
+
+class ProviderCall(db.Model):
+    """Usage metering: one row per external API call (spend dashboard)."""
+    __tablename__ = 'provider_calls'
+
+    id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
+    provider = db.Column(db.String(50), nullable=False, index=True)
+    url = db.Column(db.String(500))
+    method = db.Column(db.String(10))
+    status_code = db.Column(db.Integer, index=True)
+    ok = db.Column(db.Boolean, index=True)
+    latency_ms = db.Column(db.Float)
+    error = db.Column(db.String(300))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'provider': self.provider,
+            'url': self.url,
+            'method': self.method,
+            'status_code': self.status_code,
+            'ok': self.ok,
+            'latency_ms': self.latency_ms,
+            'error': self.error,
+            'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
 

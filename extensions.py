@@ -41,7 +41,7 @@ def init_extensions(app):
     from models import db, bcrypt
     db.init_app(app)
     bcrypt.init_app(app)
-    migrate.init_app(app, db)
+    migrate.init_app(app, db, render_as_batch=True)  # SQLite-safe ALTERs
 
     app.config.setdefault(
         'RATELIMIT_ENABLED',

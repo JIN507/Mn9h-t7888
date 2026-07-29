@@ -9,9 +9,11 @@ from flask import Blueprint, current_app, jsonify, request
 from werkzeug.utils import secure_filename
 
 from providers.imgbb import upload_to_imgbb
-from services.media_service import UPLOAD_FOLDER, allowed_file
+from services.media_service import UPLOAD_FOLDER, allowed_file, compute_hashes
 from services.search_service import (search_images, scrape_reverse_search,
-                                     build_direct_search_timeline)
+                                     build_direct_search_timeline,
+                                     persist_search, find_cached_search,
+                                     parse_iso_datetime)
 
 from extensions import limiter, SPEND_LIMIT
 
@@ -26,6 +28,7 @@ def upload_image():
     if 'file' not in request.files and 'image' not in request.form:
         return jsonify({'error': 'No image provided'}), 400
 
+    image_hash, image_phash = None, None
     if 'file' in request.files:
         file = request.files['file']
         if file.filename == '':
@@ -39,6 +42,8 @@ def upload_image():
             with open(filepath, 'rb') as f:
                 image_data = base64.b64encode(f.read()).decode('utf-8')
 
+            # SHA-256 + pHash on every upload
+            image_hash, image_phash = compute_hashes(filepath)
             os.remove(filepath)
     else:
         image_data = request.form['image']
@@ -52,6 +57,8 @@ def upload_image():
     return jsonify({
         'imageUrl': image_url,
         'searchResults': search_results,
+        'image_hash': image_hash,
+        'image_phash': image_phash,
         'timestamp': datetime.now().isoformat()
     })
 
@@ -84,36 +91,30 @@ def image_source_search():
 @bp.route('/api/xai-context', methods=['POST'])
 @limiter.limit(SPEND_LIMIT)
 def xai_context_api():
-    try:
-        data = request.get_json(silent=True) or {}
-        image_url = data.get('image_url')
+    """Queue the Grok contextual investigation - returns 202 + job id."""
+    data = request.get_json(silent=True) or {}
+    image_url = data.get('image_url')
 
-        if not image_url:
-            return jsonify({'error': 'No image_url provided', 'success': False}), 400
+    if not image_url:
+        return jsonify({'error': 'No image_url provided', 'success': False}), 400
+    if not os.environ.get('XAI_API_KEY'):
+        return jsonify({'error': 'XAI_API_KEY is not configured', 'success': False}), 500
 
-        if not os.environ.get('XAI_API_KEY'):
-            return jsonify({'error': 'XAI_API_KEY is not configured', 'success': False}), 500
+    from auth import get_current_user
+    from tasks.jobs import run_xai_investigation
+    from tasks.queue import enqueue
+    user = get_current_user()
+    job = enqueue(run_xai_investigation, image_url,
+                  user_id=user.id if user else None)
+    return jsonify({
+        'success': True,
+        'job_id': job.id,
+        'status_url': f'/api/jobs/{job.id}',
+        'events_url': f'/api/jobs/{job.id}/events',
+    }), 202
 
-        from providers.xai import investigate_image, extract_summary
 
-        resp = investigate_image(image_url)
-
-        if resp.status_code != 200:
-            return jsonify({'error': f'xAI API Error: {resp.status_code}', 'details': resp.text, 'success': False}), 502
-
-        xai_data = resp.json()
-        message_content = extract_summary(xai_data)
-
-        return jsonify({
-            'success': True,
-            'summary': message_content,
-            'raw': xai_data
-        })
-
-    except Exception as e:
-        current_app.logger.exception(f"xAI context error: {e}")
-        return jsonify({'error': str(e), 'success': False}), 500
-
+# Endpoint for Zenserp Direct Search
 @bp.route('/api/direct-search', methods=['POST'])
 @limiter.limit(SPEND_LIMIT)
 def direct_search_api():
@@ -146,6 +147,24 @@ def direct_search_api():
         if not query and not image_url:
             return jsonify({'error': 'No query or image provided', 'success': False}), 400
 
+        # Repeat-search cache: keyed on the query image's SHA-256 (supplied
+        # by /api/upload); rerun=true forces a fresh spend
+        image_hash = data.get('image_hash') or request.form.get('image_hash')
+        image_phash = data.get('image_phash') or request.form.get('image_phash')
+        rerun = bool(data.get('rerun') or request.form.get('rerun'))
+        if image_url and image_hash and not rerun:
+            cached = find_cached_search('direct', image_hash)
+            if cached and cached.raw_response:
+                logger.info('Direct-search cache hit: hash=%s', image_hash)
+                return jsonify({
+                    'success': True,
+                    'timeline': cached.raw_response.get('timeline', []),
+                    'total': cached.result_count,
+                    'cached': True,
+                    'search_id': cached.id,
+                    'raw': {}
+                })
+
         logger.info(f"[*] Starting Zenserp search. Query: {query}, Image: {image_url}")
         
         # Zenserp Search Logic
@@ -166,10 +185,29 @@ def direct_search_api():
         
         timeline = build_direct_search_timeline(zenserp_data, bool(image_url))
 
+        # Persist every search -> Search + SearchResult rows
+        from auth import get_current_user
+        user = get_current_user()
+        results = [{
+            'url': i.get('link'),
+            'title': i.get('title'),
+            'snippet': i.get('snippet'),
+            'thumbnail': i.get('thumbnail'),
+            'domain': i.get('source'),
+            'published_at': parse_iso_datetime(i.get('timestamp')),
+            'confidence': None,
+        } for i in timeline]
+        search_id = persist_search(
+            user.id if user else None, 'direct',
+            query=query, image_url=image_url,
+            image_hash=image_hash, image_phash=image_phash,
+            results=results, raw_response={'timeline': timeline})
+
         return jsonify({
             'success': True,
             'timeline': timeline,
             'total': len(timeline),
+            'search_id': search_id,
             'raw': {} # Don't send raw data to save bandwidth
         })
 
@@ -193,7 +231,21 @@ def api_image_source_search():
         filename = secure_filename(file.filename)
         filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
-        
+
+        # Repeat-search cache keyed on SHA-256; rerun=true forces fresh spend
+        media_hash, media_phash = compute_hashes(filepath)
+        rerun = str(request.form.get('rerun', '')).lower() in ('1', 'true', 'yes')
+        if not rerun:
+            cached = find_cached_search('reverse', media_hash)
+            if cached and cached.raw_response:
+                logger.info('Reverse-search cache hit: hash=%s', media_hash)
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                payload = dict(cached.raw_response)
+                payload['cached'] = True
+                payload['search_id'] = cached.id
+                return jsonify(payload)
+
         try:
             # Upload image to imgbb first to get a URL
             with open(filepath, 'rb') as f:
@@ -218,12 +270,29 @@ def api_image_source_search():
                     'imageUrl': image_url
                 }), 500
                 
-            return jsonify({
+            payload = {
                 'success': True,
                 'imageUrl': image_url,
                 'links': result.get('links', []),
+                'matches': result.get('matches', []),
                 'source': result.get('source', 'TheHive Reverse Image Search')
-            })
+            }
+
+            # Persist every search -> Search + SearchResult rows
+            from auth import get_current_user
+            user = get_current_user()
+            results = [{
+                'url': m.get('link'),
+                'title': m.get('title'),
+                'thumbnail': m.get('thumbnail'),
+            } for m in result.get('matches', [])]
+            search_id = persist_search(
+                user.id if user else None, 'reverse',
+                image_url=image_url, image_hash=media_hash,
+                image_phash=media_phash, results=results,
+                raw_response=payload)
+            payload['search_id'] = search_id
+            return jsonify(payload)
             
         except Exception as e:
             # Clean up the temporary file in case of error

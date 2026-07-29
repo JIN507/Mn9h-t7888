@@ -116,6 +116,35 @@ def make_session() -> requests.Session:
     return session
 
 
+def _meter(provider, method, url, status_code, latency_s, error=None):
+    """Best-effort usage-metering row (provider_calls). Never raises.
+
+    Uses a raw core INSERT on its own connection so it can never commit or
+    poison the caller's ORM session mid-request.
+    """
+    try:
+        from flask import has_app_context
+        if not has_app_context():
+            return
+        import uuid as _uuid
+        from datetime import datetime as _dt
+        from models import db, ProviderCall
+        with db.engine.begin() as conn:
+            conn.execute(ProviderCall.__table__.insert().values(
+                id=str(_uuid.uuid4()),
+                provider=provider,
+                url=(url or '')[:500],
+                method=method,
+                status_code=status_code,
+                ok=bool(status_code and status_code < 400),
+                latency_ms=round(latency_s * 1000, 2),
+                error=(str(error)[:300] if error else None),
+                created_at=_dt.utcnow(),
+            ))
+    except Exception:
+        logger.debug('provider metering failed', exc_info=True)
+
+
 class BaseProvider:
     """Shared session + circuit breaker + metered request()."""
     name = 'provider'
@@ -131,12 +160,16 @@ class BaseProvider:
         try:
             resp = self.session.request(
                 method, url, timeout=timeout or self.timeout, **kwargs)
-        except requests.RequestException:
+        except requests.RequestException as e:
             self.breaker.record(ok=False)
+            elapsed = time.monotonic() - started
             logger.warning('provider=%s url=%s outcome=transport_error elapsed=%.2fs',
-                           self.name, url, time.monotonic() - started)
+                           self.name, url, elapsed)
+            _meter(self.name, method, url, None, elapsed, error=e)
             raise
         self.breaker.record(ok=resp.status_code < 500)
+        elapsed = time.monotonic() - started
         logger.info('provider=%s url=%s status=%s elapsed=%.2fs',
-                    self.name, url, resp.status_code, time.monotonic() - started)
+                    self.name, url, resp.status_code, elapsed)
+        _meter(self.name, method, url, resp.status_code, elapsed)
         return resp

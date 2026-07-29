@@ -25,6 +25,82 @@ except ImportError:
 MATCH_RANK = {'exact': 0, 'similar': 1, 'page_match': 2}
 
 
+def persist_search(user_id, search_type, *, query=None, image_url=None,
+                   image_hash=None, image_phash=None, results=None,
+                   raw_response=None, processing_time_ms=None):
+    """Persist a Search + SearchResult rows. Never raises. Returns search id.
+
+    `results` items: dicts with url/title/snippet/thumbnail/domain/
+    published_at (datetime|None)/confidence.
+    """
+    from models import db, Search, SearchResult
+    try:
+        search = Search(
+            user_id=user_id,
+            search_type=search_type,
+            query=query,
+            image_url=image_url,
+            image_hash=image_hash,
+            image_phash=image_phash,
+            result_count=len(results or []),
+            processing_time_ms=processing_time_ms,
+            raw_response=raw_response,
+        )
+        db.session.add(search)
+        db.session.flush()
+        for rank, item in enumerate(results or []):
+            url = item.get('url')
+            if not url:
+                continue
+            db.session.add(SearchResult(
+                search_id=search.id,
+                url=url[:2000],
+                title=(item.get('title') or '')[:500] or None,
+                snippet=item.get('snippet'),
+                thumbnail_url=(item.get('thumbnail') or None),
+                domain=(item.get('domain') or None),
+                published_at=item.get('published_at'),
+                confidence=item.get('confidence'),
+                rank=rank,
+            ))
+        db.session.commit()
+        return search.id
+    except Exception as e:
+        logger.error('Failed to persist search: %s', e)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return None
+
+
+def find_cached_search(search_type, image_hash):
+    """Most recent Search row for the same query-image hash, or None."""
+    if not image_hash:
+        return None
+    from models import db, Search
+    try:
+        return (db.session.query(Search)
+                .filter_by(search_type=search_type, image_hash=image_hash)
+                .order_by(Search.created_at.desc())
+                .first())
+    except Exception as e:
+        logger.error('Search cache lookup failed: %s', e)
+        return None
+
+
+def parse_iso_datetime(value):
+    """ISO string -> naive datetime, or None."""
+    if not value:
+        return None
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(str(value).replace('Z', '+00:00')) \
+                       .replace(tzinfo=None)
+    except Exception:
+        return None
+
+
 def search_images(image_url):
     """Generate manual search URLs for reverse image search engines."""
     return {

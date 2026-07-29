@@ -14,9 +14,11 @@ from werkzeug.utils import secure_filename
 
 from providers.imgbb import upload_to_imgbb
 from services.detection_service import (scrape_aiornot, scrape_thehive,
-                                        scrape_faceonlive)
+                                        scrape_faceonlive, persist_analysis,
+                                        find_cached_analysis)
 from services.media_service import (UPLOAD_FOLDER, AUDIO_UPLOAD_FOLDER,
-                                    allowed_file, allowed_audio_file)
+                                    allowed_file, allowed_audio_file,
+                                    compute_hashes, compute_text_hash)
 
 from extensions import limiter, SPEND_LIMIT
 
@@ -113,11 +115,21 @@ def api_ai_detection():
         }), 500
     
     try:
-        logger.info('[DEBUG] Inside api_ai_detection try block')
-        # Print the service being requested
-        logger.info(f'[DEBUG] Service requested: {service}')
         result = None
-        
+
+        # SHA-256 + pHash on every upload; serve cache hits unless forced
+        media_hash, media_phash = compute_hashes(temp_path)
+        force = str(request.form.get('force', '')).lower() in ('1', 'true', 'yes')
+        if not force:
+            cached = find_cached_analysis('ai_image', service, media_hash)
+            if cached and cached.detailed_results:
+                logger.info('Detection cache hit: service=%s hash=%s',
+                            service, media_hash)
+                payload = dict(cached.detailed_results)
+                payload['cached'] = True
+                payload['analysis_id'] = cached.id
+                return jsonify(payload)
+
         # Upload file to imgbb to get URL for both services
         logger.info('[*] Uploading image to ImgBB...')
         with open(temp_path, 'rb') as f:
@@ -181,6 +193,16 @@ def api_ai_detection():
             }), 500
             
         logger.info(f'[✓] Successfully obtained results from {service}')
+
+        # Persist every detection -> Analysis (cache source for repeats)
+        from auth import get_current_user
+        user = get_current_user()
+        analysis_id = persist_analysis(
+            user.id if user else None, 'ai_image', service, result,
+            media_hash=media_hash, media_phash=media_phash,
+            media_url=image_url)
+        if analysis_id:
+            result['analysis_id'] = analysis_id
         return jsonify(result)
         
     except Exception as e:
@@ -268,6 +290,17 @@ def verify_audio():
         # إضافة رابط الملف الصوتي للتشغيل في واجهة المستخدم
         audio_url = url_for('static', filename=f'uploads/audio/{saved_filename}')
         
+        # SHA-256 on every upload; serve cache hits unless forced
+        media_hash, _ = compute_hashes(audio_path)
+        force = str(request.form.get('force', '')).lower() in ('1', 'true', 'yes')
+        if not force:
+            cached = find_cached_analysis('ai_audio', 'aiornot', media_hash)
+            if cached and cached.detailed_results:
+                payload = dict(cached.detailed_results)
+                payload['cached'] = True
+                payload['analysis_id'] = cached.id
+                return jsonify(payload)
+
         # Send file to AIorNot API
         try:
             from providers.aiornot import post_voice_file
@@ -317,6 +350,13 @@ def verify_audio():
                 'success': True
             }
 
+            from auth import get_current_user
+            user = get_current_user()
+            analysis_id = persist_analysis(
+                user.id if user else None, 'ai_audio', 'aiornot',
+                response_data, media_hash=media_hash, media_url=audio_url)
+            if analysis_id:
+                response_data['analysis_id'] = analysis_id
             return jsonify(response_data)
 
         except requests.exceptions.RequestException as req_error:
@@ -357,6 +397,17 @@ def api_text_detection():
     aiornot_key = os.environ.get('AIORNOT_API_KEY')
     if not aiornot_key:
         return jsonify({'error': 'مفتاح API غير متوفر', 'success': False}), 500
+
+    # SHA-256 of the text; serve cache hits unless forced
+    text_hash = compute_text_hash(text_content)
+    force = bool(data.get('force')) if isinstance(data, dict) else False
+    if not force:
+        cached = find_cached_analysis('ai_text', 'aiornot', text_hash)
+        if cached and cached.detailed_results:
+            payload = dict(cached.detailed_results)
+            payload['cached'] = True
+            payload['analysis_id'] = cached.id
+            return jsonify(payload)
 
     try:
         from providers.aiornot import post_text
@@ -404,14 +455,22 @@ def api_text_detection():
                             'confidence': ai_confidence
                         })
             
-            return jsonify({
+            payload = {
                 'success': True,
                 'verdict': verdict_text,
                 'is_ai': is_ai,
                 'confidence_ai': ai_confidence,
                 'confidence_human': human_confidence,
                 'annotations': annotations
-            })
+            }
+            from auth import get_current_user
+            user = get_current_user()
+            analysis_id = persist_analysis(
+                user.id if user else None, 'ai_text', 'aiornot',
+                payload, media_hash=text_hash)
+            if analysis_id:
+                payload['analysis_id'] = analysis_id
+            return jsonify(payload)
         else:
             # Fallback — return raw report for debugging
             report_preview = json.dumps(report_obj, ensure_ascii=False, indent=2)[:800]
@@ -432,62 +491,35 @@ def api_text_detection():
 @bp.route('/api/analyze-video', methods=['POST'])
 @limiter.limit(SPEND_LIMIT)
 def api_analyze_video():
-    """Analyze video for AI content using AIorNot API"""
-    logger.info('[*] Received video analysis request')
-    
+    """Queue AIOrNot video analysis - returns 202 + job id (SSE streamable)."""
     if 'file' not in request.files:
         return jsonify({'error': 'No file uploaded', 'success': False}), 400
-        
+
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'No file selected', 'success': False}), 400
 
-    # Save temp file
+    if not os.environ.get('AIORNOT_API_KEY'):
+        return jsonify({'error': 'AIorNot API Key missing', 'success': False}), 500
+
     temp_filename = secure_filename(f"vid_{uuid.uuid4()}_{file.filename}")
     temp_path = os.path.join(UPLOAD_FOLDER, temp_filename)
-    
-    try:
-        file.save(temp_path)
-        logger.info(f'[*] Video saved to {temp_path}')
-        
-        # Determine file size
-        file_size = os.path.getsize(temp_path)
-        logger.info(f'[*] File size: {file_size / (1024*1024):.2f} MB')
-        
-        # Check API Key
-        aiornot_key = os.environ.get('AIORNOT_API_KEY')
-        if not aiornot_key:
-             return jsonify({'error': 'AIorNot API Key missing', 'success': False}), 500
+    file.save(temp_path)
+    media_hash, _ = compute_hashes(temp_path)
 
-        # Call AIorNot API
-        from providers.aiornot import post_video_file
-        response = post_video_file(temp_path, file.filename)
-        
-        if response.status_code == 200:
-            result = response.json()
-            logger.info('DEBUG AI Response:', json.dumps(result, indent=2))
-            return jsonify({'success': True, 'data': result})
-        elif response.status_code == 422:
-             logger.info(f'[!] Validation Error: {response.text}')
-             return jsonify({'error': 'Validation Error (Check file format/parameters)', 'details': response.json(), 'success': False}), 422
-        else:
-            logger.info(f'[!] AIorNot Error: {response.text}')
-            return jsonify({'error': f'AIorNot API Error: {response.status_code}', 'details': response.text, 'success': False}), response.status_code
+    from auth import get_current_user
+    from tasks.jobs import run_video_analysis
+    from tasks.queue import enqueue
+    user = get_current_user()
+    job = enqueue(run_video_analysis, temp_path, file.filename,
+                  user_id=user.id if user else None, media_hash=media_hash)
+    return jsonify({
+        'success': True,
+        'job_id': job.id,
+        'status_url': f'/api/jobs/{job.id}',
+        'events_url': f'/api/jobs/{job.id}/events',
+    }), 202
 
-    except requests.exceptions.Timeout:
-        return jsonify({'error': 'Request timed out (Video might be too long)', 'success': False}), 504
-    except Exception as e:
-        logger.info(f'[!] Error in video analysis: {e}')
-        traceback.print_exc()
-        return jsonify({'error': str(e), 'success': False}), 500
-    finally:
-        # Cleanup
-        if os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-                logger.info(f'[*] Removed temp video: {temp_path}')
-            except:
-                pass
 
 @bp.route('/api/faceonlive-detection', methods=['POST'])
 @bp.route('/ai-detect-faceonlive', methods=['POST'])  # Keep old route for compatibility

@@ -1,13 +1,60 @@
 """Admin-only catalog & user management endpoints."""
 import logging
+from datetime import datetime, timedelta
 
 from flask import Blueprint, g, jsonify, request
+from sqlalchemy import case, func
 
 from auth import admin_required
-from models import db, User, Country, Source, UserFile
+from models import db, User, Country, Source, UserFile, ProviderCall
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('admin', __name__)
+
+
+@bp.route('/api/admin/provider-usage', methods=['GET'])
+@admin_required
+def admin_provider_usage():
+    """API spend dashboard: per-provider call counts, errors, latency."""
+    days = min(request.args.get('days', 30, type=int), 365)
+    since = datetime.utcnow() - timedelta(days=days)
+
+    provider_rows = (
+        db.session.query(
+            ProviderCall.provider,
+            func.count(ProviderCall.id).label('calls'),
+            func.sum(case((ProviderCall.ok.is_(False), 1), else_=0)).label('errors'),
+            func.avg(ProviderCall.latency_ms).label('avg_latency_ms'),
+            func.max(ProviderCall.created_at).label('last_call'),
+        )
+        .filter(ProviderCall.created_at >= since)
+        .group_by(ProviderCall.provider)
+        .order_by(func.count(ProviderCall.id).desc())
+        .all())
+
+    daily_rows = (
+        db.session.query(
+            func.date(ProviderCall.created_at).label('day'),
+            func.count(ProviderCall.id).label('calls'),
+        )
+        .filter(ProviderCall.created_at >= since)
+        .group_by(func.date(ProviderCall.created_at))
+        .order_by(func.date(ProviderCall.created_at))
+        .all())
+
+    return jsonify({
+        'success': True,
+        'days': days,
+        'providers': [{
+            'provider': r.provider,
+            'calls': int(r.calls or 0),
+            'errors': int(r.errors or 0),
+            'avg_latency_ms': round(float(r.avg_latency_ms), 1) if r.avg_latency_ms else None,
+            'last_call': r.last_call.isoformat() if r.last_call else None,
+        } for r in provider_rows],
+        'daily': [{'day': str(r.day), 'calls': int(r.calls or 0)}
+                  for r in daily_rows],
+    })
 
 
 @bp.route('/api/admin/countries', methods=['GET'])

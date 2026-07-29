@@ -48,13 +48,17 @@ def client(app):
 
 
 def make_png_bytes():
-    """Minimal valid 1x1 PNG without needing PIL."""
+    """Minimal valid 1x1 PNG. Pixel color is randomized so every test gets a
+    unique SHA-256 — otherwise the Phase-2 result cache serves one test's
+    result to the next."""
+    import os as _os
+
     def chunk(tag, data):
         raw = tag + data
         return struct.pack('>I', len(data)) + raw + struct.pack('>I', zlib.crc32(raw) & 0xffffffff)
 
     ihdr = struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)
-    idat = zlib.compress(b'\x00\xff\x00\x00')
+    idat = zlib.compress(b'\x00' + _os.urandom(3))
     return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr)
             + chunk(b'IDAT', idat) + chunk(b'IEND', b''))
 

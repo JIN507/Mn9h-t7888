@@ -21,6 +21,40 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 ALLOWED_AUDIO_EXTENSIONS = {'mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'wma'}
 
 
+def compute_hashes(file_path):
+    """SHA-256 (exact identity) + perceptual hash (images) for a file.
+
+    Returns (sha256_hex, phash_hex_or_None). Never raises.
+    """
+    sha256 = None
+    phash = None
+    try:
+        import hashlib
+        h = hashlib.sha256()
+        with open(file_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                h.update(chunk)
+        sha256 = h.hexdigest()
+    except Exception as e:
+        logger.error('sha256 failed for %s: %s', file_path, e)
+
+    try:
+        import imagehash
+        from PIL import Image
+        with Image.open(file_path) as img:
+            phash = str(imagehash.phash(img))
+    except Exception:
+        phash = None  # not an image / unreadable — fine
+
+    return sha256, phash
+
+
+def compute_text_hash(text):
+    """SHA-256 of normalized text content."""
+    import hashlib
+    return hashlib.sha256(text.strip().encode('utf-8')).hexdigest()
+
+
 def allowed_file(filename):
     return ('.' in filename
             and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS)
