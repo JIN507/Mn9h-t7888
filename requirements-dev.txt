@@ -1,3 +1,4 @@
 # Development/test dependencies (not installed on Render)
 pytest>=8.0
 responses>=0.25
+fakeredis>=2.20
