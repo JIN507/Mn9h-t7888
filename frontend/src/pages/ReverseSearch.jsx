@@ -65,22 +65,26 @@ const ReverseSearch = () => {
         }
     }, [file]);
 
-    const handleSearch = async () => {
+    const [timelineCached, setTimelineCached] = useState(false);
+
+    const handleSearch = async (rerun = false) => {
         if (!file) return;
 
         setLoading(true);
         setErrors({ engines: null, timeline: null });
         setEnginesResult(null);
         setTimelineResult(null);
+        setTimelineCached(false);
 
         // Prep form data for upload
         const formData = new FormData();
         formData.append('file', file);
 
         let uploadedImageUrl = null;
+        let uploadedHashes = {};
 
         try {
-            // Step 1: Upload and get Engine Results
+            // Step 1: Upload and get Engine Results (+ SHA-256/pHash)
             try {
                 const engineRes = await apiClient.post('/api/upload', formData, {
                     headers: { 'Content-Type': 'multipart/form-data' },
@@ -90,6 +94,10 @@ const ReverseSearch = () => {
                 if (engineRes.data?.searchResults) {
                     setEnginesResult(engineRes.data);
                     uploadedImageUrl = engineRes.data.imageUrl;
+                    uploadedHashes = {
+                        image_hash: engineRes.data.image_hash,
+                        image_phash: engineRes.data.image_phash
+                    };
                 } else {
                     setErrors(prev => ({ ...prev, engines: 'بيانات محركات البحث غير مكتملة' }));
                 }
@@ -104,9 +112,14 @@ const ReverseSearch = () => {
             // Step 2: Use the uploaded image URL to get the Timeline Results
             if (uploadedImageUrl) {
                 try {
-                    const timelineRes = await apiClient.post('/api/direct-search', { image_url: uploadedImageUrl }, { timeout: 120000 });
+                    const timelineRes = await apiClient.post('/api/direct-search', {
+                        image_url: uploadedImageUrl,
+                        ...uploadedHashes,
+                        rerun
+                    }, { timeout: 120000 });
                     if (timelineRes.data?.success) {
                         const timelineData = timelineRes.data.timeline || [];
+                        setTimelineCached(Boolean(timelineRes.data.cached));
                         if (timelineData.length > 0) {
                             setTimelineResult(timelineData);
                         } else {
@@ -145,6 +158,7 @@ const ReverseSearch = () => {
         setFile(null);
         setEnginesResult(null);
         setTimelineResult(null);
+        setTimelineCached(false);
         setErrors({ engines: null, timeline: null });
     };
 
@@ -180,7 +194,7 @@ const ReverseSearch = () => {
                     />
                     <div className="mt-6 flex gap-3">
                         <button
-                            onClick={handleSearch}
+                            onClick={() => handleSearch()}
                             disabled={!file || loading}
                             className="ai-analyze-btn flex-1"
                         >
@@ -283,6 +297,18 @@ const ReverseSearch = () => {
                         </div>
 
                         <ErrorBanner message={errors.timeline} className="mb-4" />
+
+                        {timelineCached && (
+                            <div className="flex items-center justify-between p-2.5 mb-4 bg-sky-50 border border-sky-100 rounded-xl">
+                                <span className="text-xs font-bold text-sky-700">نتيجة محفوظة من فحص سابق لنفس الصورة</span>
+                                <button
+                                    onClick={() => handleSearch(true)}
+                                    className="text-xs font-bold px-3 py-1 rounded-lg bg-white border border-sky-200 text-sky-700 hover:bg-sky-100 transition-colors"
+                                >
+                                    إعادة الفحص
+                                </button>
+                            </div>
+                        )}
 
                         {timelineResult ? (
                             <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1" dir="ltr">

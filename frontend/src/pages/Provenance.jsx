@@ -6,6 +6,7 @@ import GlassCard from '../components/GlassCard';
 import GradientButton from '../components/GradientButton';
 import DropZone from '../components/DropZone';
 import ErrorBanner from '../components/ErrorBanner';
+import useJob from '../hooks/useJob';
 
 // Match-bucket labels (exact / similar / page mention)
 const MATCH_TYPE_LABELS = {
@@ -20,6 +21,8 @@ const Provenance = () => {
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
     const [error, setError] = useState(null);
+    const [jobId, setJobId] = useState(null);
+    const { progress: jobProgress, result: jobResult, error: jobError } = useJob(jobId);
 
     // Handle file passed from navigation
     useEffect(() => {
@@ -28,18 +31,20 @@ const Provenance = () => {
         }
     }, [location.state]);
 
+    // Provenance runs as a background job (202 + SSE)
     const handleAnalyze = async () => {
         if (!file) return;
 
         setLoading(true);
         setError(null);
         setResult(null);
+        setJobId(null);
 
         const formData = new FormData();
         formData.append('file', file);
 
         try {
-            // 1. Upload to get URL
+            // 1. Upload to get URL (+ hashes for caching)
             const uploadResponse = await apiClient.post('/api/upload', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
@@ -48,19 +53,40 @@ const Provenance = () => {
                 throw new Error('Failed to upload image');
             }
 
-            // 2. Call Provenance API with URL
+            // 2. Queue the provenance job
             const provResponse = await apiClient.post('/api/provenance', {
-                image_url: uploadResponse.data.imageUrl
+                image_url: uploadResponse.data.imageUrl,
+                image_hash: uploadResponse.data.image_hash,
+                image_phash: uploadResponse.data.image_phash
             });
 
-            setResult(provResponse.data);
+            if (provResponse.status === 202 && provResponse.data.job_id) {
+                setJobId(provResponse.data.job_id);
+            } else {
+                throw new Error(provResponse.data?.error || 'فشل تحليل المصدر');
+            }
         } catch (err) {
             console.error(err);
             setError(err.response?.data?.error || err.message || 'فشل تحليل المصدر');
-        } finally {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        if (jobResult) {
+            setResult(jobResult.payload || null);
+            setLoading(false);
+            setJobId(null);
+        }
+    }, [jobResult]);
+
+    useEffect(() => {
+        if (jobError) {
+            setError(jobError);
+            setLoading(false);
+            setJobId(null);
+        }
+    }, [jobError]);
 
     return (
         <div className="max-w-6xl mx-auto">
@@ -94,6 +120,12 @@ const Provenance = () => {
                 {/* Results Section */}
                 <div className="space-y-6 animate-fade-in-up delay-200">
                     <ErrorBanner variant="panel" message={error} />
+
+                    {loading && jobProgress.length > 0 && (
+                        <div className="p-4 glass-card border-slate-200 text-slate-600 text-sm font-bold animate-fade-in">
+                            {jobProgress[jobProgress.length - 1]}
+                        </div>
+                    )}
 
                     {result && (
                         <div className="space-y-6">

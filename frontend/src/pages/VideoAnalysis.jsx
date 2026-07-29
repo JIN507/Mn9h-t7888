@@ -6,6 +6,7 @@ import GlassCard from '../components/GlassCard';
 import GradientButton from '../components/GradientButton';
 import DropZone from '../components/DropZone';
 import ErrorBanner from '../components/ErrorBanner';
+import useJob from '../hooks/useJob';
 
 // --- Components ---
 
@@ -179,6 +180,8 @@ const VideoAnalysis = () => {
     const [frames, setFrames] = useState(null);
     const [aiResult, setAiResult] = useState(null);
     const [error, setError] = useState(null);
+    const [jobId, setJobId] = useState(null);
+    const { progress: jobProgress, result: jobResult, error: jobError } = useJob(jobId);
 
     // Tab State: 'ai' or 'frames'
     const [activeTab, setActiveTab] = useState('ai');
@@ -208,11 +211,13 @@ const VideoAnalysis = () => {
         }
     };
 
+    // Video analysis now runs as a background job (202 + SSE)
     const handleAnalyzeAI = async () => {
         if (!file) return;
         setAiLoading(true);
         setError(null);
         setAiResult(null);
+        setJobId(null);
 
         const formData = new FormData();
         formData.append('file', file);
@@ -220,21 +225,42 @@ const VideoAnalysis = () => {
         try {
             const response = await apiClient.post('/api/analyze-video', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
-                timeout: 125000 // 125s timeout
+                timeout: 60000
             });
-
-            if (response.data.success) {
-                setAiResult(response.data.data);
+            if (response.status === 202 && response.data.job_id) {
+                setJobId(response.data.job_id);
             } else {
                 setError(response.data.error || 'فشل تحليل الفيديو');
+                setAiLoading(false);
             }
         } catch (err) {
             console.error(err);
             setError(err.response?.data?.error || 'فشل الاتصال بالخادم (قد يكون الملف كبيراً جداً)');
-        } finally {
             setAiLoading(false);
         }
     };
+
+    // Resolve the job result back into the legacy result shape
+    useEffect(() => {
+        if (jobResult) {
+            const payload = jobResult.payload || {};
+            if (payload.success) {
+                setAiResult(payload.data);
+            } else {
+                setError(payload.error || 'فشل تحليل الفيديو');
+            }
+            setAiLoading(false);
+            setJobId(null);
+        }
+    }, [jobResult]);
+
+    useEffect(() => {
+        if (jobError) {
+            setError(jobError);
+            setAiLoading(false);
+            setJobId(null);
+        }
+    }, [jobError]);
 
     return (
         <div className="max-w-4xl mx-auto page-container">
@@ -345,7 +371,11 @@ const VideoAnalysis = () => {
                                 <ScanFace className="w-7 h-7 text-slate-800 relative z-10" />
                             </div>
                             <h3 className="text-lg font-bold text-slate-800 mt-6 mb-2">جاري تحليل الفيديو...</h3>
-                            <p className="text-sm text-slate-500">قد يستغرق هذا بضع دقائق بناءً على طول الفيديو</p>
+                            <p className="text-sm text-slate-500">
+                                {jobProgress.length > 0
+                                    ? jobProgress[jobProgress.length - 1]
+                                    : 'قد يستغرق هذا بضع دقائق بناءً على طول الفيديو'}
+                            </p>
                             <div className="flex gap-2 mt-4">
                                 <div className="ai-loading-dot" style={{ animationDelay: '0s' }} />
                                 <div className="ai-loading-dot" style={{ animationDelay: '0.2s' }} />

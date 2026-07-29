@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
 import GradientButton from '../components/GradientButton';
-import { Users, Lock, Search, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
+import { Users, Lock, Search, AlertCircle, CheckCircle, RefreshCw, Activity } from 'lucide-react';
 
 const AdminDashboard = () => {
     const [users, setUsers] = useState([]);
@@ -17,11 +17,26 @@ const AdminDashboard = () => {
     const [newPassword, setNewPassword] = useState('');
     const [resetLoading, setResetLoading] = useState(false);
 
+    // API spend / usage state
+    const [usage, setUsage] = useState(null);
+
     useEffect(() => {
         if (isAdmin) {
             fetchUsers();
+            fetchUsage();
         }
     }, [isAdmin]);
+
+    const fetchUsage = async () => {
+        try {
+            const response = await apiClient.get('/api/admin/provider-usage?days=30');
+            if (response.data.success) {
+                setUsage(response.data);
+            }
+        } catch (err) {
+            console.error('Failed to load provider usage:', err);
+        }
+    };
 
     const fetchUsers = async () => {
         setLoading(true);
@@ -94,6 +109,51 @@ const AdminDashboard = () => {
                     {success}
                 </div>
             )}
+
+            {/* API Spend (last 30 days) */}
+            <GlassCard className="p-6 mb-6 animate-fade-in-up">
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-bold flex items-center gap-2">
+                        <Activity className="w-5 h-5 text-primary-600" />
+                        استهلاك واجهات الـ API (آخر 30 يوم)
+                    </h2>
+                    <button onClick={fetchUsage} className="p-2 hover:bg-slate-100 rounded-lg">
+                        <RefreshCw className="w-4 h-4 text-slate-500" />
+                    </button>
+                </div>
+                {usage && usage.providers.length > 0 ? (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="bg-slate-50 border-b border-slate-200">
+                                    <th className="px-4 py-2 text-right font-medium text-slate-500">المزوّد</th>
+                                    <th className="px-4 py-2 text-center font-medium text-slate-500">الطلبات</th>
+                                    <th className="px-4 py-2 text-center font-medium text-slate-500">الأخطاء</th>
+                                    <th className="px-4 py-2 text-center font-medium text-slate-500">متوسط الاستجابة</th>
+                                    <th className="px-4 py-2 text-center font-medium text-slate-500">آخر استخدام</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {usage.providers.map((p) => (
+                                    <tr key={p.provider} className="border-b border-slate-100">
+                                        <td className="px-4 py-2 font-bold text-slate-700">{p.provider}</td>
+                                        <td className="px-4 py-2 text-center font-mono">{p.calls}</td>
+                                        <td className={`px-4 py-2 text-center font-mono ${p.errors > 0 ? 'text-red-600 font-bold' : 'text-slate-400'}`}>{p.errors}</td>
+                                        <td className="px-4 py-2 text-center font-mono text-slate-500">
+                                            {p.avg_latency_ms != null ? `${Math.round(p.avg_latency_ms)}ms` : '—'}
+                                        </td>
+                                        <td className="px-4 py-2 text-center text-slate-500 text-xs" dir="ltr">
+                                            {p.last_call ? p.last_call.split('T')[0] : '—'}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <p className="text-slate-400 text-sm text-center py-4">لا توجد بيانات استهلاك بعد</p>
+                )}
+            </GlassCard>
 
             <div className="grid lg:grid-cols-3 gap-6">
                 {/* Users List */}

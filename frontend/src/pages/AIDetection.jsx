@@ -114,7 +114,7 @@ const AIDetection = () => {
         }
     }, [location.state]);
 
-    const handleAnalyze = async () => {
+    const handleAnalyze = async (force = false) => {
         if (!file) return;
         setLoading(true);
         setErrors({ thehive: null, aiornot: null });
@@ -124,10 +124,12 @@ const AIDetection = () => {
             const formData1 = new FormData();
             formData1.append('image', file);
             formData1.append('service', 'thehive');
+            if (force) formData1.append('force', 'true');
 
             const formData2 = new FormData();
             formData2.append('image', file);
             formData2.append('service', 'aiornot');
+            if (force) formData2.append('force', 'true');
 
             const [response1, response2] = await Promise.allSettled([
                 apiClient.post('/api/ai-detection', formData1, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 }),
@@ -188,7 +190,7 @@ const AIDetection = () => {
                     />
                     <div className="mt-6">
                         <button
-                            onClick={handleAnalyze}
+                            onClick={() => handleAnalyze()}
                             disabled={!file || loading}
                             className="ai-analyze-btn w-full"
                         >
@@ -223,10 +225,23 @@ const AIDetection = () => {
                 )}
 
                 {!loading && showCards && (
-                    <div className="grid md:grid-cols-2 gap-6">
-                        <DetectionResultCard result={results.thehive} error={errors.thehive} title="نتيجة الفحص الأول" index={0} />
-                        <DetectionResultCard result={results.aiornot} error={errors.aiornot} title="نتيجة الفحص الثاني" index={1} />
-                    </div>
+                    <>
+                        {(results.thehive?.cached || results.aiornot?.cached) && (
+                            <div className="flex items-center justify-between p-3 mb-4 bg-sky-50 border border-sky-100 rounded-xl animate-fade-in">
+                                <span className="text-xs font-bold text-sky-700">نتيجة محفوظة من فحص سابق لنفس الصورة</span>
+                                <button
+                                    onClick={() => handleAnalyze(true)}
+                                    className="text-xs font-bold px-3 py-1 rounded-lg bg-white border border-sky-200 text-sky-700 hover:bg-sky-100 transition-colors"
+                                >
+                                    إعادة الفحص
+                                </button>
+                            </div>
+                        )}
+                        <div className="grid md:grid-cols-2 gap-6">
+                            <DetectionResultCard result={results.thehive} error={errors.thehive} title="نتيجة الفحص الأول" index={0} />
+                            <DetectionResultCard result={results.aiornot} error={errors.aiornot} title="نتيجة الفحص الثاني" index={1} />
+                        </div>
+                    </>
                 )}
             </div>
         </div>
