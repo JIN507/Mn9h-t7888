@@ -5,13 +5,10 @@ exact legacy JSON dicts the frontend expects (Arabic verdicts included).
 """
 import json
 import logging
-import os
-import uuid
 
 from providers.aiornot import post_image_file, parse_image_report
 from providers.base import ProviderNotConfigured
 from providers.sightengine import check_genai_file, parse_genai
-from services.media_service import UPLOAD_FOLDER, download_image
 
 logger = logging.getLogger(__name__)
 
@@ -71,34 +68,17 @@ def scrape_faceonlive(image_path):
     raise RuntimeError('FaceOnLive detection is not available')
 
 
-def scrape_aiornot(image_url):
-    """Detect AI-generated images using AI-or-Not API
-    Following the exact structure from AI or Not official documentation
-    """
-    logger.info(f'[*] Starting AI-or-Not detection for image: {image_url}')
-    
+def scrape_aiornot_file(image_path):
+    """AIOrNot image detection on a LOCAL file — direct upload, the image
+    never goes to a public host (plan §3.4 privacy fix)."""
+    logger.info('Starting AI-or-Not detection (direct file upload)')
     try:
-        # Download the image to a temporary file
-        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-        temp_image_path = os.path.join(UPLOAD_FOLDER, f"aiornot_{uuid.uuid4().hex}.jpg")
-        
-        logger.info(f'[*] Downloading image to {temp_image_path}')
-        download_success = download_image(image_url, temp_image_path)
-        
-        if not download_success or not os.path.exists(temp_image_path):
-            return {
-                'error': 'Failed to download image from specified URL',
-                'success': False,
-                'imageUrl': image_url
-            }
-        
-        resp = post_image_file(temp_image_path)
+        resp = post_image_file(image_path)
         if resp.status_code >= 400:
-            error_msg = f"Failed to analyze image: {resp.status_code} {resp.text}"
             return {
-                'error': error_msg,
+                'error': f"Failed to analyze image: {resp.status_code} {resp.text}",
                 'success': False,
-                'imageUrl': image_url
+                'imageUrl': None
             }
 
         result = resp.json()
@@ -111,7 +91,6 @@ def scrape_aiornot(image_url):
         else:
             verdict_arabic = "الصورة حقيقية (غير منشأة بالذكاء الاصطناعي)"
 
-        # Return the simplified result format
         return {
             "verdict": verdict_arabic,
             "confidence_ai": dr.ai_confidence,
@@ -119,60 +98,33 @@ def scrape_aiornot(image_url):
             "generator": dr.generator,
             "generator_confidence": dr.generator_confidence,
             "rawText": json.dumps(result, indent=2),
-            "imageUrl": image_url,
+            "imageUrl": None,
             "is_ai": dr.is_ai,
             "success": True,
             "source": 'AI-or-Not'
         }
-        
+
     except Exception as e:
-        logger.info(f'[!] Error in AI-or-Not API call: {str(e)}')
-        traceback.print_exc()
+        logger.exception('Error in AI-or-Not API call')
         return {
             'error': f'Error during analysis: {str(e)}',
             'success': False,
-            'imageUrl': image_url
+            'imageUrl': None
         }
-    finally:
-        # Clean up temp file
-        try:
-            if os.path.exists(temp_image_path):
-                os.remove(temp_image_path)
-                logger.info(f'[*] Removed temporary file: {temp_image_path}')
-        except Exception as e:
-            logger.info(f'[!] Error removing temp file: {str(e)}')
-        logger.info('[*] AI-or-Not detection (Model 2) completed')
 
-def scrape_thehive(image_url):
-    """Detect AI-generated images using Sightengine API (Model 1)"""
-    logger.info(f'[*] Starting Sightengine detection (Model 1) for image: {image_url}')
-    
-    # Download the image to a temporary file
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    temp_image_path = os.path.join(UPLOAD_FOLDER, f"sightengine_{uuid.uuid4().hex}.jpg")
-    
-    logger.info(f'[*] Downloading image to {temp_image_path}')
-    download_success = download_image(image_url, temp_image_path)
-    
-    if not download_success or not os.path.exists(temp_image_path):
-        return {
-            'rawText': f'\u062e\u0637\u0623: \u0641\u0634\u0644 \u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0635\u0648\u0631\u0629 \u0645\u0646 \u0627\u0644\u0631\u0627\u0628\u0637 \u0627\u0644\u0645\u062d\u062f\u062f',
-            'source': 'Error',
-            'error': 'Failed to download image',
-            'imageUrl': image_url
-        }
-    
-    logger.info(f'[*] Image downloaded successfully to {temp_image_path}')
-    
+
+def scrape_thehive_file(image_path):
+    """Sightengine genai detection on a LOCAL file — direct upload."""
+    logger.info('Starting Sightengine detection (direct file upload)')
     try:
         try:
-            status_code, result = check_genai_file(temp_image_path)
+            status_code, result = check_genai_file(image_path)
         except ProviderNotConfigured as e:
             return {
                 'rawText': 'Sightengine credentials not configured',
                 'source': 'Model-1',
                 'error': str(e),
-                'imageUrl': image_url
+                'imageUrl': None
             }
 
         if status_code != 200 or result.get("status") != "success":
@@ -180,13 +132,15 @@ def scrape_thehive(image_url):
               'rawText': f"Error {status_code}: {result}",
               'source': 'Model-1',
               'error': result,
-              'imageUrl': image_url
+              'imageUrl': None
             }
 
         dr = parse_genai(result)
-        verdict_text = "منشأة بواسطة الذكاء الاصطناعي" if dr.is_ai else "الصورة حقيقية (غير منشأة بالذكاء الاصطناعي)"
+        verdict_text = ("منشأة بواسطة الذكاء الاصطناعي"
+                        if dr.is_ai else
+                        "الصورة حقيقية (غير منشأة بالذكاء الاصطناعي)")
 
-        # Format result to match the other model's structure for frontend compatibility
+        # Same structure as the other model for frontend compatibility
         return {
             "verdict": verdict_text,
             "confidence_ai": dr.ai_confidence,
@@ -196,27 +150,17 @@ def scrape_thehive(image_url):
             "nsfw": False,          # No NSFW info
             'source': 'Model-1',
             'rawText': json.dumps(result, indent=2),
-            'imageUrl': image_url,
+            'imageUrl': None,
             'is_ai': dr.is_ai,
             'success': True
         }
-            
+
     except Exception as e:
-        logger.info(f'[!] Error in Sightengine API call: {str(e)}')
-        traceback.print_exc()
+        logger.exception('Error in Sightengine API call')
         return {
-            'error': f'\u062e\u0637\u0623 \u0623\u062b\u0646\u0627\u0621 \u0627\u0644\u062a\u062d\u0644\u064a\u0644: {str(e)}',
-            'rawText': f'\u062e\u0637\u0623 \u0623\u062b\u0646\u0627\u0621 \u0627\u0644\u062a\u062d\u0644\u064a\u0644: {str(e)}',
+            'error': f'خطأ أثناء التحليل: {str(e)}',
+            'rawText': f'خطأ أثناء التحليل: {str(e)}',
             'source': 'Model-1',
             'success': False,
-            'imageUrl': image_url
+            'imageUrl': None
         }
-    finally:
-        # Clean up temp file
-        try:
-            if os.path.exists(temp_image_path):
-                os.remove(temp_image_path)
-                logger.info(f'[*] Removed temporary file: {temp_image_path}')
-        except Exception as e:
-            logger.info(f'[!] Error removing temp file: {str(e)}')
-        logger.info('[*] Sightengine detection (Model 1) completed')

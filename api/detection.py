@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import time
+import traceback
 import uuid
 from datetime import datetime
 
@@ -12,8 +13,8 @@ import requests
 from flask import Blueprint, current_app, jsonify, request, url_for
 from werkzeug.utils import secure_filename
 
-from providers.imgbb import upload_to_imgbb
-from services.detection_service import (scrape_aiornot, scrape_thehive,
+from services.detection_service import (scrape_aiornot_file,
+                                        scrape_thehive_file,
                                         scrape_faceonlive, persist_analysis,
                                         find_cached_analysis)
 from services.media_service import (UPLOAD_FOLDER, AUDIO_UPLOAD_FOLDER,
@@ -39,18 +40,8 @@ def ai_detect_thehive():
         os.makedirs(os.path.dirname(temp_path), exist_ok=True)
         image_file.save(temp_path)
         
-        # Upload to imgbb to get URL
-        with open(temp_path, 'rb') as img_file:
-            image_data = base64.b64encode(img_file.read()).decode('utf-8')
-        
-        upload_result = upload_to_imgbb(image_data)
-        if 'error' in upload_result:
-            return jsonify({'error': 'فشل في رفع الصورة إلى الخادم'}), 500
-            
-        image_url = upload_result.get('url')
-        
-        # Use the TheHive.ai scraper
-        results = scrape_thehive(image_url)
+        # Direct file upload — no public hosting hop
+        results = scrape_thehive_file(temp_path)
         
         # Add processing time and source info
         results['processing_time'] = f"{results.get('processing_time', 0):.1f}"
@@ -130,21 +121,8 @@ def api_ai_detection():
                 payload['analysis_id'] = cached.id
                 return jsonify(payload)
 
-        # Upload file to imgbb to get URL for both services
-        logger.info('[*] Uploading image to ImgBB...')
-        with open(temp_path, 'rb') as f:
-            image_data = base64.b64encode(f.read()).decode('utf-8')
-            
-        image_url = upload_to_imgbb(image_data)
-        if not image_url:
-            logger.info('[!] Failed to get image URL from ImgBB')
-            return jsonify({
-                'error': 'فشل في رفع الصورة للتحليل',
-                'success': False
-            }), 500
-            
-        logger.info(f'[✓] Image uploaded to ImgBB: {image_url}')
-        
+        # Detection APIs accept direct file upload: the image never
+        # leaves for a public host (plan §3.4 privacy fix)
         # Process based on selected service
         if service.lower() == 'thehive':
             # Model 1: Sightengine API (formerly TheHive.ai)
@@ -152,7 +130,7 @@ def api_ai_detection():
             
             # Call the Sightengine API with the image URL
             logger.info('[*] Starting Sightengine scraper...')
-            result = scrape_thehive(image_url)
+            result = scrape_thehive_file(temp_path)
             logger.info('Sightengine scraper (Model 1) returned: %s', result)
             
         elif service.lower() == 'aiornot':
@@ -161,7 +139,7 @@ def api_ai_detection():
             
             # Call the AI-or-Not API with the image URL
             logger.info('[*] Starting AI-or-Not scraper...')
-            result = scrape_aiornot(image_url)
+            result = scrape_aiornot_file(temp_path)
             logger.info('AI-or-Not scraper (Model 2) returned: %s', result)
             
         elif service.lower() == 'faceonlive':
@@ -199,8 +177,7 @@ def api_ai_detection():
         user = get_current_user()
         analysis_id = persist_analysis(
             user.id if user else None, 'ai_image', service, result,
-            media_hash=media_hash, media_phash=media_phash,
-            media_url=image_url)
+            media_hash=media_hash, media_phash=media_phash)
         if analysis_id:
             result['analysis_id'] = analysis_id
         return jsonify(result)
@@ -377,8 +354,6 @@ def verify_audio():
 
 
 
-
-from providers.imgbb import upload_to_imgbb
 
 @bp.route('/api/text-detection', methods=['POST'])
 @limiter.limit(SPEND_LIMIT)

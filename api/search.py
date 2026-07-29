@@ -8,7 +8,7 @@ from datetime import datetime
 from flask import Blueprint, current_app, jsonify, request
 from werkzeug.utils import secure_filename
 
-from providers.imgbb import upload_to_imgbb
+from services.storage_service import host_image
 from services.media_service import UPLOAD_FOLDER, allowed_file, compute_hashes
 from services.search_service import (search_images, scrape_reverse_search,
                                      build_direct_search_timeline,
@@ -48,7 +48,7 @@ def upload_image():
     else:
         image_data = request.form['image']
 
-    image_url = upload_to_imgbb(image_data)
+    image_url = host_image(image_data)
     if not image_url:
         return jsonify({'error': 'Failed to upload image'}), 500
 
@@ -141,7 +141,7 @@ def direct_search_api():
                     # Upload to ImgBB
                     with open(filepath, 'rb') as f:
                         image_data = base64.b64encode(f.read()).decode('utf-8')
-                    image_url = upload_to_imgbb(image_data)
+                    image_url = host_image(image_data)
                     os.remove(filepath) # clean up
             
         if not query and not image_url:
@@ -252,7 +252,7 @@ def api_image_source_search():
                 image_data = base64.b64encode(f.read()).decode('utf-8')
             
             # Get image URL from ImgBB
-            image_url = upload_to_imgbb(image_data)
+            image_url = host_image(image_data)
             if not image_url:
                 raise Exception('فشل في رفع الصورة')
                 

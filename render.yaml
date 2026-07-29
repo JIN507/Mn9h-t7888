@@ -41,6 +41,14 @@ services:
         value: /tmp/user_data
       - key: USER_DATA_DASH_PATH
         value: /tmp/user-data
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
       - key: IMGBB_API_KEY
         sync: false
       - key: SIGHTENGINE_API_USER
@@ -79,6 +87,14 @@ services:
       - key: SIGHTENGINE_API_USER
         sync: false
       - key: SIGHTENGINE_API_SECRET
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
         sync: false
       - key: IMGBB_API_KEY
         sync: false

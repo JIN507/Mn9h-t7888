@@ -32,8 +32,6 @@ AIORNOT_JSON = {'id': 'r1', 'report': {'ai_generated': {
 
 @responses.activate
 def test_detection_persists_and_caches(client, app, png_bytes):
-    mock_imgbb(responses)
-    mock_image_download(responses, png_bytes)
     responses.add(responses.POST, 'https://api.aiornot.com/v2/image/sync',
                   json=AIORNOT_JSON, status=200)
 

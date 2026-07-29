@@ -28,8 +28,6 @@ def mock_image_download(rsps, png):
 
 @responses.activate
 def test_ai_detection_aiornot(client, png_bytes):
-    mock_imgbb(responses)
-    mock_image_download(responses, png_bytes)
     responses.add(
         responses.POST, 'https://api.aiornot.com/v2/image/sync',
         json={'id': 'r1', 'report': {'ai_generated': {
@@ -52,14 +50,12 @@ def test_ai_detection_aiornot(client, png_bytes):
     assert d['generator'] == 'midjourney'
     assert d['generator_confidence'] == 0.8
     assert d['source'] == 'AI-or-Not'
-    assert d['imageUrl'] == HOSTED_IMG
+    assert d['imageUrl'] is None  # direct file upload — nothing is hosted
     assert 'الذكاء الاصطناعي' in d['verdict']
 
 
 @responses.activate
 def test_ai_detection_aiornot_human(client, png_bytes):
-    mock_imgbb(responses)
-    mock_image_download(responses, png_bytes)
     responses.add(
         responses.POST, 'https://api.aiornot.com/v2/image/sync',
         json={'id': 'r2', 'report': {'ai_generated': {
@@ -81,8 +77,6 @@ def test_ai_detection_aiornot_human(client, png_bytes):
 
 @responses.activate
 def test_ai_detection_sightengine(client, png_bytes):
-    mock_imgbb(responses)
-    mock_image_download(responses, png_bytes)
     responses.add(
         responses.POST, 'https://api.sightengine.com/1.0/check.json',
         json={'status': 'success', 'type': {'ai_generated': 0.83}}, status=200)
@@ -103,8 +97,6 @@ def test_ai_detection_sightengine(client, png_bytes):
 
 @responses.activate
 def test_ai_detection_sightengine_api_error(client, png_bytes):
-    mock_imgbb(responses)
-    mock_image_download(responses, png_bytes)
     responses.add(
         responses.POST, 'https://api.sightengine.com/1.0/check.json',
         json={'status': 'failure', 'error': {'message': 'bad'}}, status=200)
@@ -119,12 +111,10 @@ def test_ai_detection_sightengine_api_error(client, png_bytes):
 
 
 def test_ai_detection_unknown_service(client, png_bytes):
-    with responses.RequestsMock() as rsps:
-        mock_imgbb(rsps)
-        r = client.post('/api/ai-detection', data={
-            'service': 'nope',
-            'image': (io.BytesIO(png_bytes), 'x.png'),
-        }, content_type='multipart/form-data')
+    r = client.post('/api/ai-detection', data={
+        'service': 'nope',
+        'image': (io.BytesIO(png_bytes), 'x.png'),
+    }, content_type='multipart/form-data')
     assert r.status_code == 400
 
 

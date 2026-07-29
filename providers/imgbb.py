@@ -1,8 +1,9 @@
-"""ImgBB provider — temporary public image hosting.
+"""ImgBB provider — DEPRECATED public image hosting.
 
-NOTE: scheduled for replacement by R2/S3 presigned URLs (plan §3.4): user
-uploads must stop going to a public host. Until then this is the single
-place that talks to ImgBB.
+Kept only as the rollback path behind services/storage_service.host_image
+(STORAGE_BACKEND=imgbb / automatic fallback on R2 errors). Once R2 is
+verified in production, delete this module, the fallback branch, and the
+IMGBB_API_KEY env var.
 """
 import base64
 import io
