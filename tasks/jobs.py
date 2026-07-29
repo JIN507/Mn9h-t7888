@@ -130,6 +130,21 @@ def run_provenance(image_url, user_id=None, image_hash=None,
     try:
         _progress('جاري جمع المطابقات البصرية...')
         payload = analyze_provenance(image_url)
+
+        # Tier-1 visual post-filter (feature flag): every timeline entry
+        # must actually show the query image on its page
+        from services.embedding_service import visual_verify_enabled
+        if visual_verify_enabled() and payload.get('timeline'):
+            from services.visual_verify import apply_visual_post_filter
+            _progress('جاري التحقق البصري من النتائج...')
+            filtered, summary = apply_visual_post_filter(
+                payload['timeline'], image_url, url_field='url')
+            payload['timeline'] = filtered
+            payload['visual_verification'] = summary
+            dated = [i for i in filtered if i.get('published_at')]
+            payload['first_seen'] = dated[0] if dated else None
+            payload['stats']['visually_rejected'] = summary.get('rejected', 0)
+
         _progress('اكتمل تحليل المصدر')
 
         results = [{

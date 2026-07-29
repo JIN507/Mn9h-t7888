@@ -1,0 +1,6 @@
+# Visual Verification Engine (Tier 1) — DINOv2 embeddings.
+# Installed separately from requirements.txt: torch is ~1.5 GB on disk and
+# won't fit Render's free web tier. Install on the worker (or any box) that
+# sets VISUAL_VERIFY=true; without it the app runs with pHash-only verdicts.
+torch>=2.2
+timm>=1.0

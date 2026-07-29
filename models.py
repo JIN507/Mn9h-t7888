@@ -312,6 +312,28 @@ class AnalysisFrame(db.Model):
         }
 
 
+class ImageVector(db.Model):
+    """Internal provenance index: pHash + embedding of every analyzed image.
+
+    The compounding moat (VISUAL_VERIFICATION_ENGINE.md §4): repeat/viral
+    images are answered from here before any external API spend. On
+    Postgres a parallel pgvector column (embedding_vec) enables ANN search;
+    the JSON column keeps dev SQLite fully functional.
+    """
+    __tablename__ = 'image_vectors'
+
+    id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
+    media_hash = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    phash = db.Column(db.String(32), index=True)
+    dhash = db.Column(db.String(32))
+    embedding = db.Column(db.JSON)          # list[float], L2-normalized
+    dim = db.Column(db.Integer)
+    model = db.Column(db.String(64))        # encoder identifier
+    source = db.Column(db.String(20), index=True)  # query | sighting
+    ref_url = db.Column(db.String(500))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
 class ProviderCall(db.Model):
     """Usage metering: one row per external API call (spend dashboard)."""
     __tablename__ = 'provider_calls'

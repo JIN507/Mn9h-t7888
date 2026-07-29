@@ -19,10 +19,13 @@ os.environ['SIGHTENGINE_API_USER'] = 'test-se-user'
 os.environ['SIGHTENGINE_API_SECRET'] = 'test-se-secret'
 os.environ.pop('GOOGLE_APPLICATION_CREDENTIALS', None)
 os.environ['RATELIMIT_ENABLED'] = 'false'
-# Route tests exercise the ImgBB fallback path; R2 gets dedicated unit tests
+# Route tests exercise the ImgBB fallback path; R2 gets dedicated unit tests.
+# Set to EMPTY (not pop): the app's load_dotenv() won't override existing env
+# vars, so this also shields tests from real values in the developer's .env.
 for _k in ('R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY',
-           'R2_BUCKET', 'STORAGE_BACKEND', 'IMGBB_FALLBACK'):
-    os.environ.pop(_k, None)
+           'R2_BUCKET', 'STORAGE_BACKEND', 'IMGBB_FALLBACK',
+           'VISUAL_VERIFY'):
+    os.environ[_k] = ''
 
 import pytest  # noqa: E402
 

@@ -44,6 +44,13 @@ def upload_image():
 
             # SHA-256 + pHash on every upload
             image_hash, image_phash = compute_hashes(filepath)
+
+            # Feed the internal provenance index (Tier-1 visual verification)
+            from services.embedding_service import visual_verify_enabled
+            if visual_verify_enabled():
+                from services.vector_index import index_file
+                index_file(filepath, image_hash, source='query')
+
             os.remove(filepath)
     else:
         image_data = request.form['image']
@@ -185,6 +192,15 @@ def direct_search_api():
         
         timeline = build_direct_search_timeline(zenserp_data, bool(image_url))
 
+        # Tier-1 visual post-filter (feature flag): drop candidates whose
+        # pages don't actually show the query image
+        visual_summary = None
+        from services.embedding_service import visual_verify_enabled
+        if image_url and timeline and visual_verify_enabled():
+            from services.visual_verify import apply_visual_post_filter
+            timeline, visual_summary = apply_visual_post_filter(
+                timeline, image_url, url_field='link')
+
         # Persist every search -> Search + SearchResult rows
         from auth import get_current_user
         user = get_current_user()
@@ -203,13 +219,16 @@ def direct_search_api():
             image_hash=image_hash, image_phash=image_phash,
             results=results, raw_response={'timeline': timeline})
 
-        return jsonify({
+        payload = {
             'success': True,
             'timeline': timeline,
             'total': len(timeline),
             'search_id': search_id,
             'raw': {} # Don't send raw data to save bandwidth
-        })
+        }
+        if visual_summary is not None:
+            payload['visual_verification'] = visual_summary
+        return jsonify(payload)
 
     except Exception as e:
         logger.info(f"[!] Error in Direct Search: {e}")
