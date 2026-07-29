@@ -77,7 +77,8 @@ def _hash_distance(sig, pil):
     try:
         d_p = sig['phash'] - imagehash.phash(pil)
         d_d = sig['dhash'] - imagehash.dhash(pil)
-        return min(d_p, d_d)
+        # imagehash returns numpy ints — cast, or json.dumps chokes downstream
+        return int(min(d_p, d_d))
     except Exception:
         return None
 

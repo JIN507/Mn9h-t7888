@@ -62,3 +62,6 @@ user_files/
 *.sqlite
 *.sqlite3
 
+
+# Local demo/verification media (user assets, never commit)
+وسائط تحقق/
