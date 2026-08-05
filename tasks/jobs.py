@@ -36,7 +36,8 @@ def _with_app_context(fn):
 
 
 def _progress(message):
-    job = get_current_job()
+    from tasks.queue import get_current_local_job
+    job = get_current_job() or get_current_local_job()
     if job is not None:
         meta = job.get_meta(refresh=True) or {}
         meta.setdefault('progress', []).append(message)

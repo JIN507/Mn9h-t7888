@@ -4,6 +4,7 @@ import { Search, RefreshCw, Layers, Calendar, ExternalLink, ImageIcon } from 'lu
 import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
 import ErrorBanner from '../components/ErrorBanner';
+import useJob from '../hooks/useJob';
 import GradientButton from '../components/GradientButton';
 import DropZone from '../components/DropZone';
 
@@ -66,6 +67,20 @@ const ReverseSearch = () => {
     }, [file]);
 
     const [timelineCached, setTimelineCached] = useState(false);
+    const [timelineEngine, setTimelineEngine] = useState(null);
+    const [jobId, setJobId] = useState(null);
+    const { progress: jobProgress, result: jobResult, error: jobError } = useJob(jobId);
+
+    const applyTimelinePayload = (payload) => {
+        const timelineData = payload.timeline || [];
+        setTimelineCached(Boolean(payload.cached));
+        setTimelineEngine(payload.engine || null);
+        if (timelineData.length > 0) {
+            setTimelineResult(timelineData);
+        } else {
+            setErrors(prev => ({ ...prev, timeline: 'لم تتوفر تواريخ سابقة لهذه الصورة' }));
+        }
+    };
 
     const handleSearch = async (rerun = false) => {
         if (!file) return;
@@ -75,6 +90,8 @@ const ReverseSearch = () => {
         setEnginesResult(null);
         setTimelineResult(null);
         setTimelineCached(false);
+        setTimelineEngine(null);
+        setJobId(null);
 
         // Prep form data for upload
         const formData = new FormData();
@@ -83,76 +100,89 @@ const ReverseSearch = () => {
         let uploadedImageUrl = null;
         let uploadedHashes = {};
 
+        // Step 1: Upload and get Engine Results (+ SHA-256/pHash)
         try {
-            // Step 1: Upload and get Engine Results (+ SHA-256/pHash)
-            try {
-                const engineRes = await apiClient.post('/api/upload', formData, {
-                    headers: { 'Content-Type': 'multipart/form-data' },
-                    timeout: 60000
-                });
+            const engineRes = await apiClient.post('/api/upload', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+                timeout: 60000
+            });
 
-                if (engineRes.data?.searchResults) {
-                    setEnginesResult(engineRes.data);
-                    uploadedImageUrl = engineRes.data.imageUrl;
-                    uploadedHashes = {
-                        image_hash: engineRes.data.image_hash,
-                        image_phash: engineRes.data.image_phash
-                    };
-                } else {
-                    setErrors(prev => ({ ...prev, engines: 'بيانات محركات البحث غير مكتملة' }));
-                }
-            } catch (err) {
-                console.error('Engine search error:', err);
-                setErrors(prev => ({
-                    ...prev,
-                    engines: err.response?.data?.error || 'فشل الاتصال بخدمة الرفع ومحركات البحث'
-                }));
-            }
-
-            // Step 2: Use the uploaded image URL to get the Timeline Results
-            if (uploadedImageUrl) {
-                try {
-                    const timelineRes = await apiClient.post('/api/direct-search', {
-                        image_url: uploadedImageUrl,
-                        ...uploadedHashes,
-                        rerun
-                    }, { timeout: 120000 });
-                    if (timelineRes.data?.success) {
-                        const timelineData = timelineRes.data.timeline || [];
-                        setTimelineCached(Boolean(timelineRes.data.cached));
-                        if (timelineData.length > 0) {
-                            setTimelineResult(timelineData);
-                        } else {
-                            setErrors(prev => ({ ...prev, timeline: 'لم تتوفر تواريخ سابقة لهذه الصورة' }));
-                        }
-                    } else {
-                        setErrors(prev => ({ ...prev, timeline: timelineRes.data?.error || 'فشل استخراج الجدول الزمني' }));
-                    }
-                } catch (err) {
-                    console.error('Timeline search error:', err);
-                    if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-                        setErrors(prev => ({ ...prev, timeline: 'انتهت مهلة استخراج التواريخ' }));
-                    } else {
-                        setErrors(prev => ({ 
-                            ...prev, 
-                            timeline: err.response?.data?.error || 'فشل الاتصال بخدمة الجدول الزمني' 
-                        }));
-                    }
-                }
+            if (engineRes.data?.searchResults) {
+                setEnginesResult(engineRes.data);
+                uploadedImageUrl = engineRes.data.imageUrl;
+                uploadedHashes = {
+                    image_hash: engineRes.data.image_hash,
+                    image_phash: engineRes.data.image_phash
+                };
             } else {
-                setErrors(prev => ({ 
-                    ...prev, 
-                    timeline: 'تم إيقاف البحث الزمني بسبب فشل رفع الصورة'
-                }));
+                setErrors(prev => ({ ...prev, engines: 'بيانات محركات البحث غير مكتملة' }));
             }
-
         } catch (err) {
-            console.error('Fatal wrapper error:', err);
-            setErrors({ engines: 'فشل النظام كلياً', timeline: 'فشل النظام كلياً' });
-        } finally {
-            setLoading(false);
+            console.error('Engine search error:', err);
+            setErrors(prev => ({
+                ...prev,
+                engines: err.response?.data?.error || 'فشل الاتصال بخدمة الرفع ومحركات البحث'
+            }));
         }
+
+        if (!uploadedImageUrl) {
+            setErrors(prev => ({
+                ...prev,
+                timeline: 'تم إيقاف البحث الزمني بسبب فشل رفع الصورة'
+            }));
+            setLoading(false);
+            return;
+        }
+
+        // Step 2: Timeline search — instant 200 on cache hit, else a
+        // background job streamed over SSE (progress shown while it runs)
+        try {
+            const timelineRes = await apiClient.post('/api/direct-search', {
+                image_url: uploadedImageUrl,
+                ...uploadedHashes,
+                rerun
+            }, { timeout: 30000 });
+
+            if (timelineRes.status === 202 && timelineRes.data.job_id) {
+                setJobId(timelineRes.data.job_id);  // loading continues via SSE
+                return;
+            }
+            if (timelineRes.data?.success) {
+                applyTimelinePayload(timelineRes.data);
+            } else {
+                setErrors(prev => ({ ...prev, timeline: timelineRes.data?.error || 'فشل استخراج الجدول الزمني' }));
+            }
+        } catch (err) {
+            console.error('Timeline search error:', err);
+            setErrors(prev => ({
+                ...prev,
+                timeline: err.response?.data?.error || 'فشل الاتصال بخدمة الجدول الزمني'
+            }));
+        }
+        setLoading(false);
     };
+
+    // Background job resolution
+    useEffect(() => {
+        if (jobResult) {
+            const payload = jobResult.payload || {};
+            if (payload.success) {
+                applyTimelinePayload(payload);
+            } else {
+                setErrors(prev => ({ ...prev, timeline: payload.error || 'فشل استخراج الجدول الزمني' }));
+            }
+            setLoading(false);
+            setJobId(null);
+        }
+    }, [jobResult]);
+
+    useEffect(() => {
+        if (jobError) {
+            setErrors(prev => ({ ...prev, timeline: jobError }));
+            setLoading(false);
+            setJobId(null);
+        }
+    }, [jobError]);
 
     const handleReset = () => {
         setFile(null);
@@ -236,7 +266,11 @@ const ReverseSearch = () => {
                         <Search className="w-7 h-7 text-slate-800 relative z-10" />
                     </div>
                     <h3 className="text-lg font-bold text-slate-800 mt-6 mb-2">جاري البحث المتزامن...</h3>
-                    <p className="text-sm text-slate-500">يتم البحث في المحركات واستخراج الجدول الزمني</p>
+                    <p className="text-sm text-slate-500">
+                        {jobProgress.length > 0
+                            ? jobProgress[jobProgress.length - 1]
+                            : 'يتم البحث في المحركات واستخراج الجدول الزمني'}
+                    </p>
                     <div className="flex gap-2 mt-4">
                         <div className="ai-loading-dot" style={{ animationDelay: '0s' }} />
                         <div className="ai-loading-dot" style={{ animationDelay: '0.2s' }} />
@@ -307,6 +341,14 @@ const ReverseSearch = () => {
                                 >
                                     إعادة الفحص
                                 </button>
+                            </div>
+                        )}
+
+                        {timelineEngine === 'google_lens_fallback' && (
+                            <div className="p-2.5 mb-4 bg-amber-50 border border-amber-100 rounded-xl">
+                                <span className="text-xs font-bold text-amber-700">
+                                    تعذّر الوصول لمحرك الجدول الزمني — النتائج من Google Lens مباشرة
+                                </span>
                             </div>
                         )}
 

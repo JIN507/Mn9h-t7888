@@ -1,12 +1,17 @@
-"""Queue plumbing.
+"""Queue plumbing — three modes, same 202+SSE contract everywhere:
 
-With REDIS_URL set (Render): real Redis + a separate RQ worker process
-(worker.py). Without it (local dev, tests): fakeredis + synchronous
-execution — enqueue runs the job inline, so the API contract (202 + job
-polling/SSE) stays identical everywhere with no Redis install needed.
+- redis  (REDIS_URL set, production): real Redis + RQ worker process
+- thread (local dev default):        jobs run in a background thread with an
+                                     in-process registry — 202 returns
+                                     instantly and SSE streams live progress,
+                                     exactly like production, no Redis needed
+- inline (QUEUE_MODE=inline, tests): job executes synchronously inside
+                                     enqueue() for deterministic tests
 """
 import logging
 import os
+import threading
+import uuid
 
 from redis import Redis
 from rq import Queue
@@ -20,9 +25,64 @@ _queue = None
 JOB_RESULT_TTL = 3600  # keep results for an hour
 JOB_TIMEOUT = 600      # hard cap per job
 
+# ------------------------------------------------------------- local jobs
+
+_local_jobs = {}
+_local_lock = threading.Lock()
+_local_current = threading.local()
+
+
+class LocalJob:
+    """Duck-typed stand-in for rq.job.Job used in thread/dev mode."""
+
+    def __init__(self):
+        self.id = str(uuid.uuid4())
+        self.status = 'queued'
+        self.meta = {}
+        self.exc_info = None
+        self._result = None
+
+    def get_status(self, refresh=True):
+        return self.status
+
+    def get_meta(self, refresh=True):
+        return self.meta
+
+    def save_meta(self):
+        pass
+
+    def return_value(self):
+        return self._result
+
+
+def get_current_local_job():
+    return getattr(_local_current, 'job', None)
+
+
+def _run_local(job, func, args, kwargs):
+    job.status = 'started'
+    _local_current.job = job
+    try:
+        job._result = func(*args, **kwargs)
+        job.status = 'finished'
+    except Exception as e:
+        logger.exception('local job %s failed', job.id)
+        job.exc_info = f'{type(e).__name__}: {e}'
+        job.status = 'failed'
+    finally:
+        _local_current.job = None
+
+
+# ------------------------------------------------------------ mode + redis
+
+def queue_mode():
+    if os.environ.get('REDIS_URL'):
+        return 'redis'
+    return os.environ.get('QUEUE_MODE', 'thread')
+
 
 def is_async():
-    return bool(os.environ.get('REDIS_URL'))
+    return queue_mode() == 'redis'
 
 
 def get_connection():
@@ -33,8 +93,7 @@ def get_connection():
             _connection = Redis.from_url(redis_url)
         else:
             import fakeredis
-            logger.info('REDIS_URL not set — using fakeredis with '
-                        'synchronous job execution')
+            logger.info('REDIS_URL not set — fakeredis (%s mode)', queue_mode())
             _connection = fakeredis.FakeStrictRedis()
     return _connection
 
@@ -48,8 +107,20 @@ def get_queue():
     return _queue
 
 
+# ---------------------------------------------------------------- public
+
 def enqueue(func, *args, **kwargs):
-    """Enqueue a job; returns the RQ Job."""
+    """Enqueue a job; returns an rq Job or a LocalJob (same interface)."""
+    mode = queue_mode()
+    if mode == 'thread':
+        job = LocalJob()
+        with _local_lock:
+            _local_jobs[job.id] = job
+        threading.Thread(target=_run_local, args=(job, func, args, kwargs),
+                         daemon=True).start()
+        return job
+
+    # 'redis' (async) and 'inline' (sync fakeredis, used by tests)
     return get_queue().enqueue(
         func, *args, result_ttl=JOB_RESULT_TTL,
         failure_ttl=JOB_RESULT_TTL, **kwargs)
@@ -57,6 +128,9 @@ def enqueue(func, *args, **kwargs):
 
 def fetch_job(job_id):
     """Fetch a job by id, or None if unknown/expired."""
+    with _local_lock:
+        if job_id in _local_jobs:
+            return _local_jobs[job_id]
     try:
         return Job.fetch(job_id, connection=get_connection())
     except Exception:
