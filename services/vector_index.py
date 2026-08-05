@@ -72,19 +72,31 @@ def _sync_pgvector_column(row_id, emb_list):
         logger.debug('pgvector sync skipped: %s', e)
 
 
-def index_file(path, media_hash, source='query', ref_url=None):
-    """Compute the full signature of a local image file and index it."""
+def index_bytes(data, media_hash, source='query', ref_url=None):
+    """Compute the full signature of image bytes and index it."""
     try:
+        import io
         import imagehash
         from PIL import Image
         from services.embedding_service import embed_image, encoder_available
-        with Image.open(path) as img:
+        with Image.open(io.BytesIO(data)) as img:
             pil = img.convert('RGB')
             phash = imagehash.phash(pil)
             dhash = imagehash.dhash(pil)
             embedding = embed_image(pil) if encoder_available() else None
         return store_signature(media_hash, phash=phash, dhash=dhash,
                                embedding=embedding, source=source,
+                               ref_url=ref_url)
+    except Exception as e:
+        logger.error('index_bytes failed: %s', e)
+        return None
+
+
+def index_file(path, media_hash, source='query', ref_url=None):
+    """Compute the full signature of a local image file and index it."""
+    try:
+        with open(path, 'rb') as f:
+            return index_bytes(f.read(), media_hash, source=source,
                                ref_url=ref_url)
     except Exception as e:
         logger.error('index_file failed: %s', e)

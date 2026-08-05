@@ -255,6 +255,9 @@ def test_upload_indexes_query_image(client, app, monkeypatch, png_bytes,
     responses.add(responses.POST, 'https://api.imgbb.com/1/upload',
                   json={'success': True,
                         'data': {'url': 'https://i.ibb.co/x.png'}}, status=200)
+    # the index job downloads the hosted image (worker-side embedding)
+    responses.add(responses.GET, 'https://i.ibb.co/x.png', body=png_bytes,
+                  status=200, content_type='image/png')
     r = client.post('/api/upload', data={'file': (io.BytesIO(png_bytes), 'v.png')},
                     content_type='multipart/form-data')
     d = r.get_json()

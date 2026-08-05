@@ -74,6 +74,18 @@ def _load_model():
             logger.error('Could not load embedding model: %s', e)
 
 
+def warm_up():
+    """Load the model and run one dummy embed (worker boot preload)."""
+    if not encoder_available():
+        return False
+    try:
+        from PIL import Image
+        return embed_image(Image.new('RGB', (32, 32))) is not None
+    except Exception as e:
+        logger.warning('embedding warm-up failed: %s', e)
+        return False
+
+
 def embed_image(image):
     """PIL.Image | path | bytes -> L2-normalized float32 numpy vector, or None."""
     import numpy as np

@@ -105,6 +105,14 @@ def test_image_source_search_persists_and_caches(client, app, png_bytes):
     assert d2['search_id'] == d1['search_id']
 
 
+def _finished_job(client, response):
+    assert response.status_code == 202
+    body = response.get_json()
+    state = client.get(body['status_url']).get_json()
+    assert state['status'] == 'finished', state
+    return state['result']
+
+
 @responses.activate
 def test_direct_search_cache_by_hash(client, app):
     responses.add(responses.GET, 'https://app.zenserp.com/api/v2/search',
@@ -114,8 +122,9 @@ def test_direct_search_cache_by_hash(client, app):
                   status=200)
 
     fake_hash = 'f' * 64
-    d1 = client.post('/api/direct-search', json={
-        'image_url': HOSTED_IMG, 'image_hash': fake_hash}).get_json()
+    r1 = client.post('/api/direct-search', json={
+        'image_url': HOSTED_IMG, 'image_hash': fake_hash})
+    d1 = _finished_job(client, r1)['payload']
     assert d1['success'] is True and d1.get('search_id')
 
     # repeat with same hash -> served from DB, no Zenserp call
@@ -129,9 +138,10 @@ def test_direct_search_cache_by_hash(client, app):
                   json={'reverse_image_results': {
                       'similar_images': [], 'pages_with_matching_images': [],
                       'organic': []}}, status=200)
-    d3 = client.post('/api/direct-search', json={
+    r3 = client.post('/api/direct-search', json={
         'image_url': HOSTED_IMG, 'image_hash': fake_hash,
-        'rerun': True}).get_json()
+        'rerun': True})
+    d3 = _finished_job(client, r3)['payload']
     assert 'cached' not in d3
 
 

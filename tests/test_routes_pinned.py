@@ -240,8 +240,9 @@ def test_direct_search_image_mode_ignores_organic(client):
         }}, status=200)
 
     r = client.post('/api/direct-search', json={'image_url': HOSTED_IMG})
-    d = r.get_json()
+    d = _finished_job(client, r)['payload']
     assert d['success'] is True
+    assert d['engine'] == 'zenserp'
     got = {i['link']: i['type'] for i in d['timeline']}
     assert got == {'https://s.example': 'similar',
                    'https://p.example': 'page_match'}
@@ -256,7 +257,7 @@ def test_direct_search_text_mode_uses_organic(client):
         status=200)
 
     r = client.post('/api/direct-search', json={'query': 'اختبار'})
-    d = r.get_json()
+    d = _finished_job(client, r)['payload']
     assert d['success'] is True
     assert d['total'] == 1
     assert d['timeline'][0]['type'] == 'organic'

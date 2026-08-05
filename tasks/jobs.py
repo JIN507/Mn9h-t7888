@@ -122,6 +122,126 @@ def run_xai_investigation(image_url, user_id=None):
 
 
 @_with_app_context
+def run_direct_search(query=None, image_url=None, user_id=None,
+                      image_hash=None, image_phash=None):
+    """Timeline search as a background job (was the blocking /api/direct-search).
+
+    Zenserp with one retry (their failures are unbilled); when Zenserp stays
+    down in image mode, falls back to the Google Lens harvest so the search
+    ALWAYS returns something. Translation + visual verification also happen
+    here, off the web workers.
+    """
+    from urllib.parse import urlparse
+    from providers.zenserp import reverse_image_search, text_search
+    from services.search_service import (build_direct_search_timeline,
+                                         scrape_reverse_search,
+                                         persist_search, parse_iso_datetime)
+
+    image_mode = bool(image_url)
+    engine = 'zenserp'
+    zenserp_data = None
+    last_error = None
+
+    _progress('جاري البحث في محركات البحث...')
+    for attempt in (1, 2):
+        try:
+            if image_mode:
+                resp = reverse_image_search(image_url, gl='us', hl='en')
+            else:
+                resp = text_search(query, num=40, gl='sa', hl='ar')
+            if resp.status_code == 200:
+                zenserp_data = resp.json()
+                break
+            last_error = f'Zenserp API Error: {resp.status_code}'
+            logger.warning('%s (attempt %d): %s', last_error, attempt,
+                           resp.text[:200])
+        except requests.RequestException as e:
+            last_error = f'Zenserp request failed: {e}'
+            logger.warning('%s (attempt %d)', last_error, attempt)
+        if attempt == 1:
+            _progress('محرك البحث بطيء الاستجابة — محاولة ثانية...')
+
+    if zenserp_data is not None:
+        _progress('جاري تحليل النتائج وترجمتها...')
+        timeline = build_direct_search_timeline(zenserp_data, image_mode)
+    elif image_mode:
+        # Zenserp is down — the reliable Lens harvest becomes the timeline
+        _progress('التبديل إلى Google Lens...')
+        engine = 'google_lens_fallback'
+        lens = scrape_reverse_search(image_url)
+        timeline = [{
+            'title': m.get('title') or None,
+            'link': m.get('link'),
+            'snippet': None,
+            'thumbnail': m.get('thumbnail'),
+            'date_text': None,
+            'timestamp': None,
+            'source': urlparse(m['link']).netloc if m.get('link') else 'Web',
+            'type': m.get('match_type', 'similar'),
+        } for m in lens.get('matches', [])]
+        if not timeline and (lens.get('error') or not lens.get('success')):
+            # both engines genuinely down — say so instead of an empty 200
+            return {'status': 502, 'payload': {
+                'error': last_error or 'Search engines unavailable',
+                'success': False}}
+    else:
+        return {'status': 502, 'payload': {
+            'error': last_error or 'Zenserp API Error', 'success': False}}
+
+    # Tier-1 visual post-filter (feature flag)
+    visual_summary = None
+    from services.embedding_service import visual_verify_enabled
+    if image_mode and timeline and visual_verify_enabled():
+        from services.visual_verify import apply_visual_post_filter
+        _progress('جاري التحقق البصري من النتائج...')
+        timeline, visual_summary = apply_visual_post_filter(
+            timeline, image_url, url_field='link')
+
+    results = [{
+        'url': i.get('link'),
+        'title': i.get('title'),
+        'snippet': i.get('snippet'),
+        'thumbnail': i.get('thumbnail'),
+        'domain': i.get('source'),
+        'published_at': parse_iso_datetime(i.get('timestamp')),
+        'confidence': None,
+    } for i in timeline]
+    search_id = persist_search(
+        user_id, 'direct', query=query, image_url=image_url,
+        image_hash=image_hash, image_phash=image_phash, results=results,
+        raw_response={'timeline': timeline, 'engine': engine})
+
+    _progress('اكتمل البحث')
+    payload = {
+        'success': True,
+        'timeline': timeline,
+        'total': len(timeline),
+        'search_id': search_id,
+        'engine': engine,
+        'raw': {}
+    }
+    if visual_summary is not None:
+        payload['visual_verification'] = visual_summary
+    return {'status': 200, 'payload': payload}
+
+
+@_with_app_context
+def run_index_image(image_url, media_hash):
+    """Index an uploaded image into the internal provenance index.
+
+    Runs in the worker so the web process never loads the embedding model
+    (torch would not fit the web dyno's memory).
+    """
+    from services.vector_index import index_bytes
+    try:
+        r = requests.get(image_url, timeout=(5, 15))
+        r.raise_for_status()
+        index_bytes(r.content, media_hash, source='query')
+    except Exception as e:
+        logger.warning('index job failed for %s: %s', media_hash, e)
+
+
+@_with_app_context
 def run_provenance(image_url, user_id=None, image_hash=None,
                    image_phash=None):
     """Provenance analysis (page-fetch heavy; was blocking /api/provenance)."""

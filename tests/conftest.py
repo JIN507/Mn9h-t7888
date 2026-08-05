@@ -49,6 +49,23 @@ def app():
     return _flask_app()
 
 
+@pytest.fixture(autouse=True)
+def _reset_circuit_breakers():
+    """Providers are process-wide singletons; without a reset, failures
+    injected by one test open the breaker for later tests."""
+    yield
+    import importlib
+    for mod_name in ('providers.zenserp', 'providers.serpapi',
+                     'providers.aiornot', 'providers.sightengine',
+                     'providers.imgbb', 'providers.xai', 'providers.storage'):
+        try:
+            provider = getattr(importlib.import_module(mod_name), '_provider', None)
+            if provider is not None:
+                provider.breaker.failures = 0
+        except Exception:
+            pass
+
+
 @pytest.fixture()
 def client(app):
     return app.test_client()

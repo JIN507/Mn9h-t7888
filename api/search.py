@@ -45,12 +45,6 @@ def upload_image():
             # SHA-256 + pHash on every upload
             image_hash, image_phash = compute_hashes(filepath)
 
-            # Feed the internal provenance index (Tier-1 visual verification)
-            from services.embedding_service import visual_verify_enabled
-            if visual_verify_enabled():
-                from services.vector_index import index_file
-                index_file(filepath, image_hash, source='query')
-
             os.remove(filepath)
     else:
         image_data = request.form['image']
@@ -60,6 +54,14 @@ def upload_image():
         return jsonify({'error': 'Failed to upload image'}), 500
 
     search_results = search_images(image_url)
+
+    # Feed the internal provenance index in the background — the WORKER owns
+    # the embedding model; the web process never loads torch
+    from services.embedding_service import visual_verify_enabled
+    if image_hash and visual_verify_enabled():
+        from tasks.jobs import run_index_image
+        from tasks.queue import enqueue
+        enqueue(run_index_image, image_url, image_hash)
 
     return jsonify({
         'imageUrl': image_url,
@@ -125,40 +127,32 @@ def xai_context_api():
 @bp.route('/api/direct-search', methods=['POST'])
 @limiter.limit(SPEND_LIMIT)
 def direct_search_api():
-    """API endpoint for Direct Search using Zenserp"""
+    """Queue a timeline search — 202 + SSE. Cache hits return 200 instantly."""
     try:
         data = request.get_json(silent=True) or {}
-        query = data.get('query')
-        image_url = data.get('image_url')
-        
-        if not query and not image_url:
-            # Check form data if json is empty
-            query = request.form.get('query')
-            image_url = request.form.get('image_url')
-        
-        if not query and not image_url:
-             # Handle file upload for reverse image search
-            if 'file' in request.files:
-                file = request.files['file']
-                if file and allowed_file(file.filename):
-                    filename = secure_filename(file.filename)
-                    filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-                    file.save(filepath)
-                    
-                    # Upload to ImgBB
-                    with open(filepath, 'rb') as f:
-                        image_data = base64.b64encode(f.read()).decode('utf-8')
-                    image_url = host_image(image_data)
-                    os.remove(filepath) # clean up
-            
-        if not query and not image_url:
-            return jsonify({'error': 'No query or image provided', 'success': False}), 400
-
-        # Repeat-search cache: keyed on the query image's SHA-256 (supplied
-        # by /api/upload); rerun=true forces a fresh spend
+        query = data.get('query') or request.form.get('query')
+        image_url = data.get('image_url') or request.form.get('image_url')
         image_hash = data.get('image_hash') or request.form.get('image_hash')
         image_phash = data.get('image_phash') or request.form.get('image_phash')
         rerun = bool(data.get('rerun') or request.form.get('rerun'))
+
+        # Legacy path: direct file upload to this endpoint
+        if not query and not image_url and 'file' in request.files:
+            file = request.files['file']
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                with open(filepath, 'rb') as f:
+                    image_data = base64.b64encode(f.read()).decode('utf-8')
+                image_hash, image_phash = compute_hashes(filepath)
+                image_url = host_image(image_data)
+                os.remove(filepath)
+
+        if not query and not image_url:
+            return jsonify({'error': 'No query or image provided', 'success': False}), 400
+
+        # Repeat-search cache: same image hash -> instant answer, zero spend
         if image_url and image_hash and not rerun:
             cached = find_cached_search('direct', image_hash)
             if cached and cached.raw_response:
@@ -169,70 +163,26 @@ def direct_search_api():
                     'total': cached.result_count,
                     'cached': True,
                     'search_id': cached.id,
+                    'engine': cached.raw_response.get('engine'),
                     'raw': {}
                 })
 
-        logger.info(f"[*] Starting Zenserp search. Query: {query}, Image: {image_url}")
-        
-        # Zenserp Search Logic
-        from providers.zenserp import reverse_image_search, text_search
-
-        if image_url:
-            # Keep US/English for broader search + better source data; we translate after
-            resp = reverse_image_search(image_url, gl='us', hl='en')
-        else:
-            resp = text_search(query, num=40, gl='sa', hl='ar')
-        
-        if resp.status_code != 200:
-            logger.info(f"[!] Zenserp API Error: {resp.text}")
-            return jsonify({'error': f'Zenserp API Error: {resp.status_code}', 'details': resp.text, 'success': False}), 502
-
-        zenserp_data = resp.json()
-        logger.info(f"[*] Zenserp response keys: {zenserp_data.keys()}")
-        
-        timeline = build_direct_search_timeline(zenserp_data, bool(image_url))
-
-        # Tier-1 visual post-filter (feature flag): drop candidates whose
-        # pages don't actually show the query image
-        visual_summary = None
-        from services.embedding_service import visual_verify_enabled
-        if image_url and timeline and visual_verify_enabled():
-            from services.visual_verify import apply_visual_post_filter
-            timeline, visual_summary = apply_visual_post_filter(
-                timeline, image_url, url_field='link')
-
-        # Persist every search -> Search + SearchResult rows
         from auth import get_current_user
+        from tasks.jobs import run_direct_search
+        from tasks.queue import enqueue
         user = get_current_user()
-        results = [{
-            'url': i.get('link'),
-            'title': i.get('title'),
-            'snippet': i.get('snippet'),
-            'thumbnail': i.get('thumbnail'),
-            'domain': i.get('source'),
-            'published_at': parse_iso_datetime(i.get('timestamp')),
-            'confidence': None,
-        } for i in timeline]
-        search_id = persist_search(
-            user.id if user else None, 'direct',
-            query=query, image_url=image_url,
-            image_hash=image_hash, image_phash=image_phash,
-            results=results, raw_response={'timeline': timeline})
-
-        payload = {
+        job = enqueue(run_direct_search, query=query, image_url=image_url,
+                      user_id=user.id if user else None,
+                      image_hash=image_hash, image_phash=image_phash)
+        return jsonify({
             'success': True,
-            'timeline': timeline,
-            'total': len(timeline),
-            'search_id': search_id,
-            'raw': {} # Don't send raw data to save bandwidth
-        }
-        if visual_summary is not None:
-            payload['visual_verification'] = visual_summary
-        return jsonify(payload)
+            'job_id': job.id,
+            'status_url': f'/api/jobs/{job.id}',
+            'events_url': f'/api/jobs/{job.id}/events',
+        }), 202
 
     except Exception as e:
-        logger.info(f"[!] Error in Direct Search: {e}")
-        traceback.print_exc()
+        logger.exception('direct-search error')
         return jsonify({'error': str(e), 'success': False}), 500
 
 @bp.route('/api/image-source-search', methods=['POST'])
