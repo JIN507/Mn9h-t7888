@@ -183,9 +183,11 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
            'matched_image_url': None, 'checked_images': 0}
 
     candidates = []
+    engine_given = set()
     for extra in extra_image_urls or []:
         if extra and extra.startswith('http') and extra not in candidates:
             candidates.append(extra)
+            engine_given.add(extra)
     for found in extract_candidate_images(html or '', url):
         if found not in candidates:
             candidates.append(found)
@@ -218,7 +220,8 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
             if distance <= PHASH_SAME_MAX_DISTANCE:
                 out.update(verdict='confirmed', match_kind='exact',
                            phash_distance=distance, matched_image_url=img_url,
-                           matched_size=pil.size)
+                           matched_size=pil.size,
+                           matched_from='engine' if img_url in engine_given else 'page')
                 if keep_bytes:
                     out['matched_image_bytes'] = data
                     out['matched_headers'] = dict(r.headers)
@@ -237,6 +240,7 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
         out['matched_image_url'] = best_url
         if best_blob is not None:
             out['matched_size'] = best_blob[2]
+            out['matched_from'] = 'engine' if best_url in engine_given else 'page'
             if keep_bytes:
                 out['matched_image_bytes'] = best_blob[0]
                 out['matched_headers'] = best_blob[1]

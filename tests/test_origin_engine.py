@@ -18,6 +18,33 @@ def test_canonical_url_strips_tracking_www_mobile_and_slash():
     assert oe.canonical_url('') is None
 
 
+def test_is_listing_url_and_social():
+    for u in ('https://economictimes.indiatimes.com/topic/merchant-navy',
+              'https://gcaptain.com/author/mike/page/13/',
+              'https://site.example/tag/fire', 'https://site.example/',
+              'https://site.example/news?page=3'):
+        assert oe.is_listing_url(u), u
+    for u in ('https://gcaptain.com/major-fire-breaks-out/',
+              'https://x.com/IndiaCoastGuard/status/1814337329387175999',
+              'https://news.example/2024/07/19/story'):
+        assert not oe.is_listing_url(u), u
+    assert oe.is_social('https://x.com/a/status/1') and not oe.is_social('https://news.example/a')
+
+
+def test_listing_pages_never_first_and_rank_last():
+    listing = _item('https://news.example/topic/x', '2016-01-01T00:00:00Z', 0.99, 'confirmed')
+    listing['is_listing'] = True
+    article = _item('https://news.example/2024/07/20/story', '2024-07-20T00:00:00Z', 0.9, 'confirmed')
+    assert oe.assess([listing, article])['url'] == article['url']
+    cands = [{'url': 'https://a.example/topic/x', 'canonical': 'https://a.example/topic/x',
+              'domain': 'a.example', 'match_type': 'exact', 'providers': ['tineye_web'],
+              'crawl_date': '2019', 'is_image': False},
+             {'url': 'https://x.com/u/status/1', 'canonical': 'https://x.com/u/status/1',
+              'domain': 'x.com', 'match_type': 'exact', 'providers': ['google_lens'],
+              'crawl_date': None, 'is_image': False}]
+    assert oe.prioritize(cands, 2, 3)[0]['url'] == 'https://x.com/u/status/1'
+
+
 def test_is_junk_and_image_url():
     assert oe.is_junk('https://lens.google.com/x')
     assert oe.is_junk('https://web.archive.org/web/2020/x')
@@ -72,14 +99,14 @@ def test_prioritize_orders_and_caps_per_domain():
 
 # ---------------------------------------------------------------- harvest
 
-def test_lens_exact_retries_once_on_error_or_empty(monkeypatch):
-    """Live finding: SerpAPI dropped one Lens call and returned an empty 200
-    for the other in the same run, leaving the harvest with no exact matches."""
+def test_lens_exact_retries_twice_uncached(monkeypatch):
+    """Live finding: SerpAPI returns empty 200s for Lens exact and then
+    serves them from cache. Retry twice, bypassing the cache on retries."""
     monkeypatch.setattr(oe, 'LENS_RETRY_DELAY_S', 0)
     calls = []
 
-    def flaky(image_url, lens_type, hl='ar', country='sa'):
-        calls.append(hl)
+    def flaky(image_url, lens_type, hl='ar', country='sa', no_cache=False):
+        calls.append(no_cache)
         if len(calls) == 1:
             raise RuntimeError('connection reset')
         if len(calls) == 2:
@@ -87,11 +114,14 @@ def test_lens_exact_retries_once_on_error_or_empty(monkeypatch):
         return [{'link': 'https://ok.example', 'match_type': 'exact', 'provider': 'google_lens'}]
 
     monkeypatch.setattr(oe, 'lens_matches', flaky)
-    with pytest.raises(RuntimeError):
-        oe._lens_exact_with_retry('u', 'en', 'us')      # error, then empty -> raise
-    assert len(calls) == 2
-    got = oe._lens_exact_with_retry('u', 'en', 'us')    # 3rd call succeeds at once
-    assert got and len(calls) == 3
+    got = oe._lens_exact_with_retry('u', 'en', 'us')    # error, empty, ok
+    assert got and calls == [False, True, True]
+
+    calls.clear()
+    monkeypatch.setattr(oe, 'lens_matches',
+                        lambda *a, **k: calls.append(1) or [])
+    assert oe._lens_exact_with_retry('u', 'en', 'us') == []
+    assert len(calls) == 3                               # all attempts empty -> []
 
 
 # ----------------------------------------------------------------- assess
@@ -105,12 +135,65 @@ def test_assess_picks_earliest_eligible_only():
     timeline = [
         _item('https://fake.example', '2010-01-01T00:00:00Z', 0.99, 'rejected'),
         _item('https://weak.example', '2011-01-01T00:00:00Z', 0.3, 'confirmed'),
+        _item('https://htmldate-only.example', '2011-06-01T00:00:00Z', 0.8, 'confirmed'),
         _item('https://sim.example', '2012-01-01T00:00:00Z', 0.9, 'unverified', 'similar'),
         _item('https://ok.example', '2013-01-01T00:00:00Z', 0.9, 'unverified', 'exact'),
         _item('https://later.example', '2014-01-01T00:00:00Z', 0.95, 'confirmed'),
     ]
-    assert oe.assess(timeline)['url'] == 'https://ok.example'
+    first = oe.assess(timeline)
+    assert first['url'] == 'https://ok.example'
     assert oe.assess([]) is None
+    # weakly dated / rejected earlier pages are surfaced as hints, not answers
+    hints = oe.earlier_hints(timeline, first)
+    assert [h['url'] for h in hints] == ['https://weak.example',
+                                         'https://htmldate-only.example']
+    assert oe.earlier_hints(timeline, None) == []
+
+
+def test_thumbnail_only_and_image_upload_date_rules(monkeypatch):
+    """Live finding: a 2017 article served the photo from a 2025 upload
+    path via a 390x220 related-post thumbnail and was named first seen."""
+    page = ('<html><head><title>old</title>'
+            '<meta property="article:published_time" content="2017-10-09T05:26:40Z">'
+            '</head></html>')
+    monkeypatch.setattr(oe, 'fetch_page', lambda url, timeout=None: type('P', (), {'text': page, 'headers': {}})())
+    monkeypatch.setattr(oe, 'verify_html', lambda html, url, sig, **kw: {
+        'verdict': 'confirmed', 'match_kind': 'variant', 'similarity': 0.94,
+        'phash_distance': 13, 'checked_images': 2,
+        'matched_image_url': 'https://old.example/wp-content/uploads/2025/05/fire.webp?resize=390,220',
+        'matched_size': (390, 220), 'matched_from': 'page'})
+    monkeypatch.setattr(oe.wayback_provider, 'earliest_capture', lambda u: None)
+    cand = {'url': 'https://old.example/story-284665/', 'canonical': 'https://old.example/story-284665',
+            'domain': 'old.example', 'match_type': 'exact', 'providers': ['google_lens'],
+            'engine_images': [], 'thumbnail': None, 'crawl_date': None, 'is_image': False}
+    item = oe.inspect_candidate(cand, {'phash': 'p'}, use_wayback=False)
+    assert item['visual']['thumbnail_only'] is True
+    assert item['published_at'] == '2025-05-01T00:00:00Z'     # image upload date, not 2017
+    assert item['is_lower_bound'] is True and item['confidence'] == 0.5
+    sources = {e['source'] for e in item['evidence']}
+    assert 'image:upload_path_date' in sources
+    assert 'meta:article:published_time?before_image_upload' in sources
+    assert not oe._eligible_first(item)                       # thumbnails are never first
+    # a lower bound alone (big image, old article) is also never "first"
+    item['visual'].pop('thumbnail_only')
+    assert not oe._eligible_first(item)
+
+    # JS-only pages (X) verify against the ENGINE's small thumbnail: exempt
+    monkeypatch.setattr(oe, 'fetch_page', lambda url, timeout=None: type('P', (), {'text': '<html></html>', 'headers': {}})())
+    monkeypatch.setattr(oe, 'verify_html', lambda html, url, sig, **kw: {
+        'verdict': 'confirmed', 'match_kind': 'variant', 'similarity': 0.91,
+        'phash_distance': 10, 'checked_images': 1,
+        'matched_image_url': 'https://encrypted-tbn0.gstatic.com/images?q=x',
+        'matched_size': (259, 194), 'matched_from': 'engine'})
+    cand = {'url': 'https://x.com/IndiaCoastGuard/status/1814337329387175999',
+            'canonical': 'https://x.com/IndiaCoastGuard/status/1814337329387175999',
+            'domain': 'x.com', 'match_type': 'exact', 'providers': ['google_lens'],
+            'engine_images': ['https://encrypted-tbn0.gstatic.com/images?q=x'],
+            'thumbnail': None, 'crawl_date': None, 'is_image': False}
+    post = oe.inspect_candidate(cand, {'phash': 'p'}, use_wayback=False)
+    assert not post['visual'].get('thumbnail_only')
+    assert post['published_at'] == '2024-07-19T16:31:42Z' and oe._eligible_first(post)
+    assert oe.to_search_payload({'success': True, 'timeline': [item]})['timeline'][0]['date_found']         == 'ليس قبل 2025-05-01'
 
 
 def test_assess_same_day_exact_timestamp_beats_day_precision():
@@ -165,7 +248,7 @@ class _FakePage:
 def fake_world(monkeypatch):
     calls = {'lens': [], 'wayback': []}
 
-    def lens(image_url, lens_type, hl='ar', country='sa'):
+    def lens(image_url, lens_type, hl='ar', country='sa', no_cache=False):
         calls['lens'].append((image_url, lens_type, hl))
         if image_url == 'https://news.example/full.jpg':   # pivot round
             return [{'link': 'https://x.com/someone/status/1700000000000000000',

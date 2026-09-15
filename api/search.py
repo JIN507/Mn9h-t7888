@@ -160,7 +160,8 @@ def direct_search_api():
                 payload = {k: v for k, v in cached.raw_response.items()
                            if k in ('timeline', 'engine', 'first_seen',
                                     'narrative', 'engines', 'stats',
-                                    'rounds', 'note')}
+                                    'rounds', 'note', 'agent',
+                                    'earlier_hints')}
                 payload.update({
                     'success': True,
                     'timeline': payload.get('timeline') or [],

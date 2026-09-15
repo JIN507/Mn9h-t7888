@@ -221,6 +221,15 @@ def html_date_evidence(html, url):
         except Exception as e:
             logger.debug('htmldate failed for %s: %s', url, e)
 
+    # A date within the last ~36 h usually means "this page is live/dynamic
+    # and shows today", not "published now": cap it hard.
+    fresh = _now() - timedelta(hours=36)
+    for e in out:
+        dt = parse_date(e['date'])
+        if dt is not None and dt >= fresh:
+            e['confidence'] = min(e['confidence'], 0.3)
+            e['source'] += '?fresh'
+
     if soup is not None and not out:
         try:
             text = soup.get_text(' ', strip=True)[:3000]
@@ -308,9 +317,12 @@ def resolve_published_at(evidence, bounds=None):
                 'is_upper_bound': True}
 
     if best is not None and earliest_bound is not None \
-            and best['date'] > earliest_bound['date']:
-        # Page claims a date AFTER it was already archived/crawled: the
-        # claim is stale (re-dated repost, updated timestamp). Trust the bound.
+            and best['date'] > earliest_bound['date'] \
+            and best['confidence'] < 0.9:
+        # Page claims a date AFTER it was already archived/crawled and the
+        # claim is not a first-class publish tag: trust the bound. (An
+        # explicit article:published_time / JSON-LD / platform ID wins —
+        # archive captures of dynamic pages predate the content on them.)
         return {'published_at': earliest_bound['date'],
                 'confidence': max(earliest_bound['confidence'], 0.6),
                 'evidence': [earliest_bound] + evidence,

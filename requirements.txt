@@ -30,6 +30,9 @@ SpeechRecognition>=3.10.0
 deep-translator>=1.11.4
 dateparser>=1.2.0
 htmldate>=1.8.0
+# Browser-driven engines (TinEye/Bing websites). After install run:
+#   python -m playwright install chromium
+playwright>=1.47
 
 # تحليل الويب والأتمتة (Scraping)
 beautifulsoup4>=4.12.2

@@ -51,6 +51,15 @@ JUNK_HOSTS = ('google.', 'lens.google', 'bing.com', 'yandex.', 'tineye.com',
 SOCIAL_HOSTS = ('twitter.com', 'x.com', 'facebook.com', 'instagram.com',
                 't.me', 'telegram.me', 'reddit.com', 'tiktok.com',
                 'youtube.com', 'youtu.be', 'threads.net', 'vk.com')
+# Listing/index pages (topic, tag, author, category, pagination, home) show
+# whatever is newest: they are never an origin and their archive history
+# says nothing about when a given image appeared on them.
+_LISTING_RE = re.compile(
+    r'(^/$)|/(topic|topics|tag|tags|category|categories|author|authors|'
+    r'search|archive|archives|latest|photos|gallery|galleries|videos)(/|$)|'
+    r'/page/\d+(/|$)|[?&](page|p)=\d+', re.IGNORECASE)
+_THUMB_HOSTS = ('gstatic.com', 'ggpht.com', 'bing.net', 'yandex.net',
+                'tineye.com', 'pinimg.com')
 
 DEFAULT_BUDGET = {
     'max_rounds': 2,          # expansion rounds after the initial harvest
@@ -63,7 +72,12 @@ DEFAULT_BUDGET = {
     'workers': 8,
 }
 
-FIRST_SEEN_MIN_CONFIDENCE = 0.5
+# "First seen" needs a strongly dated page: platform IDs, publish tags,
+# structured data, or a heuristic date corroborated by a second source.
+# An htmldate-only guess (0.80) on a dynamic page has repeatedly produced
+# false origins in live runs; such pages are reported as earlier_hints.
+FIRST_SEEN_MIN_CONFIDENCE = 0.84
+THUMBNAIL_MIN_PX = 250
 
 
 def _noop(_msg):
@@ -104,19 +118,37 @@ def domain_of(url):
     return host[4:] if host.startswith('www.') else host
 
 
+def is_social(url):
+    host = urlparse(url).netloc.lower()
+    return any(h in host for h in SOCIAL_HOSTS)
+
+
+def is_listing_url(url):
+    try:
+        p = urlparse(url)
+    except Exception:
+        return False
+    path = re.sub(r'/+$', '', p.path) or '/'
+    return bool(_LISTING_RE.search(path + ('?' + p.query if p.query else '')))
+
+
 # ------------------------------------------------------------------ harvest
 
-LENS_EXACT_RETRIES = 1
+LENS_EXACT_RETRIES = 2
+HARVEST_TIMEOUT_S = 60     # slow engines are dropped, not waited for
+INSPECT_TIMEOUT_S = 90     # per inspection batch
 LENS_RETRY_DELAY_S = float(os.environ.get('LENS_RETRY_DELAY_S', '2'))
 
 
 def _lens_exact_with_retry(image_url, hl, country):
     """Lens exact matches are the backbone of the harvest; SerpAPI has
-    transient blips (connection resets, empty 200s). Retry once."""
+    transient blips (connection resets, empty 200s that it then caches).
+    Retry twice, bypassing SerpAPI's cache on the retries."""
     last_error = None
     for attempt in range(LENS_EXACT_RETRIES + 1):
         try:
-            got = lens_matches(image_url, 'exact_matches', hl=hl, country=country)
+            got = lens_matches(image_url, 'exact_matches', hl=hl, country=country,
+                               no_cache=attempt > 0)
             if got:
                 return got
             logger.info('lens exact %s/%s empty (attempt %d)', hl, country, attempt + 1)
@@ -125,14 +157,26 @@ def _lens_exact_with_retry(image_url, hl, country):
             logger.info('lens exact %s/%s failed (attempt %d): %s', hl, country,
                         attempt + 1, e)
         if attempt < LENS_EXACT_RETRIES:
-            time.sleep(LENS_RETRY_DELAY_S)
+            time.sleep(LENS_RETRY_DELAY_S * (attempt + 1))
     if last_error is not None:
         raise last_error
     return []
 
 
-def _harvest(image_url, progress, engines_status, *, include_visual=True):
-    """Run every candidate generator in parallel. Returns raw match dicts."""
+def _browser_engine(name):
+    """Playwright-driven engines (TinEye / Bing websites) — optional dep."""
+    try:
+        from providers import browser_search
+    except Exception:  # playwright not installed
+        return None
+    if not browser_search.configured():
+        return None
+    return getattr(browser_search, name, None)
+
+
+def engine_table(image_url, *, include_visual=True):
+    """name -> zero-arg callable for every engine that is configured.
+    Also returns {name: note} for engines that are NOT available."""
     tasks = {
         'lens_exact_en': lambda: _lens_exact_with_retry(image_url, 'en', 'us'),
         'lens_exact_ar': lambda: _lens_exact_with_retry(image_url, 'ar', 'sa'),
@@ -143,36 +187,75 @@ def _harvest(image_url, progress, engines_status, *, include_visual=True):
     if include_visual:
         tasks['lens_visual'] = lambda: lens_matches(
             image_url, 'visual_matches', hl='en', country='us')
+    unavailable = {}
     if not tineye_provider.configured():
         tasks.pop('tineye')
-        engines_status['tineye'] = {'ok': False, 'count': 0,
-                                    'note': 'not configured'}
+        web = _browser_engine('tineye_web')
+        if web is not None:
+            tasks['tineye_web'] = lambda: web(image_url)
+        else:
+            unavailable['tineye'] = 'not configured'
     if not vision_provider.configured():
         tasks.pop('vision')
-        engines_status['vision'] = {'ok': False, 'count': 0,
-                                    'note': 'not configured'}
+        unavailable['vision'] = 'not configured'
+    bing = _browser_engine('bing_web')
+    if bing is not None:
+        tasks['bing_web'] = lambda: bing(image_url)
+    else:
+        unavailable['bing'] = 'not configured'
+    return tasks, unavailable
+
+
+ENGINE_NAMES = ('lens_exact_en', 'lens_exact_ar', 'lens_visual', 'yandex',
+                'tineye', 'tineye_web', 'vision', 'bing_web')
+
+
+def harvest_engine(name, image_url):
+    """Run ONE engine (agent tool). Returns (matches, status_dict)."""
+    tasks, unavailable = engine_table(image_url)
+    if name not in tasks:
+        note = (unavailable.get(name) or unavailable.get(name.replace('_web', ''))
+                or ('not configured' if name in ENGINE_NAMES else 'unknown engine'))
+        return [], {'ok': False, 'count': 0, 'note': note}
+    try:
+        got = tasks[name]() or []
+        return got, {'ok': True, 'count': len(got)}
+    except Exception as e:
+        logger.warning('engine %s failed: %s', name, e)
+        return [], {'ok': False, 'count': 0, 'note': str(e)[:120]}
+
+
+def _harvest(image_url, progress, engines_status, *, include_visual=True):
+    """Run every candidate generator in parallel. Returns raw match dicts."""
+    tasks, unavailable = engine_table(image_url, include_visual=include_visual)
+    for name, note in unavailable.items():
+        engines_status[name] = {'ok': False, 'count': 0, 'note': note}
 
     matches = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(tasks)) as ex:
-        futures = {ex.submit(fn): name for name, fn in tasks.items()}
-        try:
-            for fut in concurrent.futures.as_completed(futures, timeout=90):
-                name = futures[fut]
-                try:
-                    got = fut.result() or []
-                    engines_status[name] = {'ok': True, 'count': len(got)}
-                    matches.extend(got)
-                    progress(f'{name}: {len(got)} نتيجة')
-                except Exception as e:  # provider failures never stop the run
-                    logger.warning('engine %s failed: %s', name, e)
-                    engines_status[name] = {'ok': False, 'count': 0,
-                                            'note': str(e)[:120]}
-        except concurrent.futures.TimeoutError:
-            for fut, name in futures.items():
-                if not fut.done():
-                    engines_status[name] = {'ok': False, 'count': 0,
-                                            'note': 'timeout'}
-                    fut.cancel()
+    # No context manager: a straggling engine must not block the run
+    # (shutdown(wait=False) lets it finish in the background, ignored).
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=len(tasks))
+    futures = {ex.submit(fn): name for name, fn in tasks.items()}
+    try:
+        for fut in concurrent.futures.as_completed(futures, timeout=HARVEST_TIMEOUT_S):
+            name = futures[fut]
+            try:
+                got = fut.result() or []
+                engines_status[name] = {'ok': True, 'count': len(got)}
+                matches.extend(got)
+                progress(f'{name}: {len(got)} نتيجة')
+            except Exception as e:  # provider failures never stop the run
+                logger.warning('engine %s failed: %s', name, e)
+                engines_status[name] = {'ok': False, 'count': 0,
+                                        'note': str(e)[:120]}
+    except concurrent.futures.TimeoutError:
+        for fut, name in futures.items():
+            if not fut.done():
+                engines_status[name] = {'ok': False, 'count': 0,
+                                        'note': 'timeout'}
+                fut.cancel()
+    finally:
+        ex.shutdown(wait=False)
     return matches
 
 
@@ -219,9 +302,11 @@ def prioritize(candidates, limit, per_domain):
         if c['crawl_date']:
             s -= 5                                    # TinEye dated it
         if any(h in c['domain'] for h in SOCIAL_HOSTS):
-            s -= 2                                    # origins are often social
+            s -= 4                                    # origins are often social; exact timestamps
         if c['is_image']:
             s += 3                                    # bare files: weak pages
+        if is_listing_url(c['url']):
+            s += 6                                    # topic/tag/home pages: never origins
         return s
 
     ranked = sorted(candidates, key=score)
@@ -278,6 +363,7 @@ def inspect_candidate(cand, query_sig, *, use_wayback=True, strict=False):
         'confidence': 0.0, 'evidence': [], 'bound': None, 'is_upper_bound': False,
         'visual': {'verdict': 'unverified'}, 'captured_at': None,
         'image_size': None, 'snippet': '', 'origin_round': cand.get('round', 0),
+        'is_listing': is_listing_url(url),
     }
     evidence = list(de.platform_date(url)) + list(de.url_path_date(url))
     bounds = []
@@ -309,29 +395,72 @@ def inspect_candidate(cand, query_sig, *, use_wayback=True, strict=False):
     blob = visual.pop('matched_image_bytes', None)
     img_headers = visual.pop('matched_headers', None)
     size = visual.pop('matched_size', None)
+    matched_from = visual.pop('matched_from', 'page')
     out['visual'] = {k: visual.get(k) for k in
                      ('verdict', 'match_kind', 'similarity', 'phash_distance',
                       'matched_image_url')}
     if size:
         out['image_size'] = list(size)
+        # A tiny variant is a sidebar/related-post thumbnail, not the page's
+        # own use of the image: keep it in the timeline, never call it first.
+        # (Engine-provided thumbnails are exempt: JS-only pages such as X
+        # expose no images to fetch, so the engine's thumb is all we have.)
+        if (min(size) < THUMBNAIL_MIN_PX and out['visual']['match_kind'] == 'variant'
+                and matched_from == 'page'):
+            out['visual']['thumbnail_only'] = True
     if blob:
         out['captured_at'] = de.exif_capture_date(blob)
     if img_headers:
         evidence.extend(de.header_date_evidence(img_headers))
-    if cand.get('is_image') and headers is None and img_headers is None:
-        pass
 
-    strong = any(e['confidence'] >= 0.9 for e in evidence)
-    if use_wayback and not strong and out['visual']['verdict'] != 'rejected':
+    # The matched image FILE's upload date (/uploads/2025/05/...) is a LOWER
+    # bound on when the image was on this page: an article dated 2017 that
+    # serves the image from a 2025 upload path re-used it in 2025.
+    lower = None
+    img_url = out['visual'].get('matched_image_url')
+    if img_url and not any(h in img_url for h in _THUMB_HOSTS):
+        for e in de.url_path_date(img_url):
+            lower = e
+            break
+    if lower:
+        evidence = [dict(e, confidence=min(e['confidence'], 0.4),
+                         source=e['source'] + '?before_image_upload')
+                    if e['date'] < lower['date'][:10] and not e['source'].startswith('platform:')
+                    else e for e in evidence]
+
+    # Archive bounds: only when the page itself gave nothing solid, never
+    # for listing pages (dynamic) or social posts (archive rarely has them,
+    # and their own IDs/meta are far better).
+    strong = any(e['confidence'] >= 0.8 for e in evidence)
+    if (use_wayback and not strong and out['visual']['verdict'] != 'rejected'
+            and not out['is_listing'] and not is_social(url)):
         wb = wayback_provider.earliest_capture(url)
         if wb:
             bounds.append({'date': wb, 'confidence': 0.6,
                            'source': 'wayback:first_capture'})
+        # the matched image FILE's first capture is a bound on the image
+        # itself (listing-proof), when it is hosted by the site, not a CDN thumb
+        img = out['visual'].get('matched_image_url')
+        if img and not any(h in img for h in _THUMB_HOSTS):
+            wbi = wayback_provider.earliest_capture(img)
+            if wbi:
+                bounds.append({'date': wbi, 'confidence': 0.65,
+                               'source': 'wayback:image_first_capture'})
 
     resolved = de.resolve_published_at(evidence, bounds)
     out.update({k: resolved[k] for k in
                 ('published_at', 'confidence', 'evidence', 'bound',
                  'is_upper_bound')})
+    out['is_lower_bound'] = False
+    if lower and (out['published_at'] is None or out['published_at'] < lower['date']):
+        # The page's own date predates the image file: the image was added
+        # later. All we know is "not before the upload month" — a lower
+        # bound, reported as such and never eligible as first seen.
+        out['published_at'] = lower['date']
+        out['confidence'] = 0.5
+        out['is_lower_bound'] = True
+        out['evidence'] = [{'date': lower['date'], 'confidence': 0.5,
+                            'source': 'image:upload_path_date'}] + list(out['evidence'])
 
     if strict and out['visual']['verdict'] != 'confirmed':
         out['dropped'] = 'text_pivot_unconfirmed'
@@ -342,25 +471,27 @@ def inspect_many(cands, query_sig, workers, progress, *, strict=False):
     results = []
     if not cands:
         return results
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-        futures = {ex.submit(inspect_candidate, c, query_sig, strict=strict): c
-                   for c in cands}
-        done = 0
-        try:
-            for fut in concurrent.futures.as_completed(futures, timeout=150):
-                done += 1
-                try:
-                    results.append(fut.result())
-                except Exception as e:
-                    c = futures[fut]
-                    logger.info('inspect failed %s: %s', c['url'], e)
-                if done % 5 == 0:
-                    progress(f'تم فحص {done}/{len(cands)} صفحة')
-        except concurrent.futures.TimeoutError:
-            logger.warning('inspect_many: %d/%d pages timed out',
-                           len(cands) - done, len(cands))
-            for fut in futures:
-                fut.cancel()
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+    futures = {ex.submit(inspect_candidate, c, query_sig, strict=strict): c
+               for c in cands}
+    done = 0
+    try:
+        for fut in concurrent.futures.as_completed(futures, timeout=INSPECT_TIMEOUT_S):
+            done += 1
+            try:
+                results.append(fut.result())
+            except Exception as e:
+                c = futures[fut]
+                logger.info('inspect failed %s: %s', c['url'], e)
+            if done % 5 == 0:
+                progress(f'تم فحص {done}/{len(cands)} صفحة')
+    except concurrent.futures.TimeoutError:
+        logger.warning('inspect_many: %d/%d pages timed out',
+                       len(cands) - done, len(cands))
+        for fut in futures:
+            fut.cancel()
+    finally:
+        ex.shutdown(wait=False)
     return results
 
 
@@ -368,7 +499,9 @@ def inspect_many(cands, query_sig, workers, progress, *, strict=False):
 
 def _eligible_first(item):
     v = item['visual']['verdict']
-    if v == 'rejected' or item.get('dropped'):
+    if v == 'rejected' or item.get('dropped') or item.get('is_listing'):
+        return False
+    if item['visual'].get('thumbnail_only') or item.get('is_lower_bound'):
         return False
     if not item['published_at'] or item['confidence'] < FIRST_SEEN_MIN_CONFIDENCE:
         return False
@@ -393,6 +526,21 @@ def assess(timeline):
     dated = [i for i in timeline if _eligible_first(i)]
     dated.sort(key=_first_seen_key)
     return dated[0] if dated else None
+
+
+def earlier_hints(timeline, first_seen, limit=5):
+    """Visually-confirmed sightings dated EARLIER than first_seen that did
+    not meet the first-seen bar (weak date, lower bound, listing page,
+    thumbnail). Shown to the analyst as leads, never as the answer."""
+    if not first_seen:
+        return []
+    cutoff = first_seen['published_at'][:10]
+    hints = [i for i in timeline
+             if i.get('published_at') and i['published_at'][:10] < cutoff
+             and i['visual']['verdict'] in ('confirmed', 'ambiguous')
+             and not i.get('dropped') and not _eligible_first(i)]
+    hints.sort(key=_first_seen_key)
+    return hints[:limit]
 
 
 # ------------------------------------------------------------------- expand
@@ -517,7 +665,8 @@ def _narrative(payload, llm_calls, budget):
 def _public_item(i):
     keep = ('url', 'domain', 'title', 'match_type', 'providers', 'thumbnail',
             'published_at', 'confidence', 'evidence', 'bound', 'is_upper_bound',
-            'visual', 'captured_at', 'image_size', 'origin_round')
+            'visual', 'captured_at', 'image_size', 'origin_round', 'is_listing',
+            'is_lower_bound')
     item = {k: i.get(k) for k in keep}
     item['link'] = i['url']
     item['type'] = i['match_type']
@@ -616,6 +765,7 @@ def investigate_origin(image_url, *, progress=None, budget=None):
         'success': True,
         'engine': 'origin_engine',
         'first_seen': _public_item(first_seen) if first_seen else None,
+        'earlier_hints': [_public_item(i) for i in earlier_hints(timeline, first_seen)],
         'timeline': [_public_item(i) for i in ordered],
         'stats': stats,
         'engines': engines_status,
@@ -648,6 +798,8 @@ def to_search_payload(report):
             date_found = published[:10]
             if i.get('is_upper_bound'):
                 date_found = 'على الأقل منذ ' + date_found
+            elif i.get('is_lower_bound'):
+                date_found = 'ليس قبل ' + date_found
         else:
             date_found = 'بدون تاريخ'
         timeline.append({
@@ -680,6 +832,8 @@ def to_search_payload(report):
         'stats': report.get('stats') or {},
         'rounds': report.get('rounds') or [],
         'note': report.get('note'),
+        'agent': report.get('agent'),
+        'earlier_hints': report.get('earlier_hints') or [],
         'raw': {},
     }
 

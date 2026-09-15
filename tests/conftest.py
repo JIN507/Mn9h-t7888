@@ -21,6 +21,8 @@ os.environ.pop('GOOGLE_APPLICATION_CREDENTIALS', None)
 os.environ['RATELIMIT_ENABLED'] = 'false'
 os.environ['QUEUE_MODE'] = 'inline'  # jobs run synchronously in tests
 os.environ['LENS_RETRY_DELAY_S'] = '0'  # origin engine retries without sleeping
+os.environ['BROWSER_SEARCH'] = 'false'  # never launch Chromium / hit tineye.com in tests
+os.environ['ORIGIN_AGENT'] = 'false'  # route tests use the deterministic engine
 # Route tests exercise the ImgBB fallback path; R2 gets dedicated unit tests.
 # Set to EMPTY (not pop): the app's load_dotenv() won't override existing env
 # vars, so this also shields tests from real values in the developer's .env.

@@ -96,16 +96,35 @@ def test_resolve_prefers_highest_confidence_and_corroborates():
     assert r['is_upper_bound'] is False
 
 
-def test_resolve_bound_overrides_later_page_claim():
-    """Page says 2022 but the archive captured it in 2019 -> 2019 wins."""
-    ev = [{'date': '2022-03-01T00:00:00Z', 'confidence': 0.95,
-           'source': 'meta:article:published_time'}]
+def test_resolve_bound_overrides_weak_later_page_claim_only():
+    """Weak page date (htmldate 0.8) after an archive capture -> the bound
+    wins. A first-class publish tag (>=0.9) is NOT overridden: archive
+    captures of dynamic pages predate the content shown on them (live
+    finding: a 2016 capture of a /topic/ page vs a 2024 photo)."""
     bounds = [{'date': '2019-05-05T00:00:00Z', 'confidence': 0.6,
                'source': 'wayback:first_capture'}]
-    r = de.resolve_published_at(ev, bounds)
+    weak = [{'date': '2022-03-01T00:00:00Z', 'confidence': 0.8,
+             'source': 'htmldate:original'}]
+    r = de.resolve_published_at(weak, bounds)
     assert r['published_at'] == '2019-05-05T00:00:00Z'
     assert r['is_upper_bound'] is True
     assert r['bound']['source'] == 'wayback:first_capture'
+
+    strong = [{'date': '2022-03-01T00:00:00Z', 'confidence': 0.95,
+               'source': 'meta:article:published_time'}]
+    r = de.resolve_published_at(strong, bounds)
+    assert r['published_at'] == '2022-03-01T00:00:00Z'
+    assert r['is_upper_bound'] is False
+
+
+def test_fresh_dates_are_capped():
+    """A live listing page 'published' within the last 36 h is not evidence."""
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    html = f'<html><head><meta property="article:published_time" content="{today}"></head></html>'
+    ev = de.html_date_evidence(html, 'https://news.example/topic/x')
+    assert ev and all(e['confidence'] <= 0.3 for e in ev)
+    assert ev[0]['source'].endswith('?fresh')
 
 
 def test_resolve_bound_only_and_nothing():

@@ -1,12 +1,12 @@
-"""DeepSeek provider — text LLM used surgically inside the origin engine.
+"""DeepSeek provider — the LLM behind the origin investigation.
 
-Two jobs only (both optional — no key => the engine runs deterministically):
-  1. plan_expansion: read the harvested candidates (titles, captions,
-     credit lines) and propose targeted text queries + credited sources.
-  2. write_narrative: Arabic summary where every claim cites evidence.
-
-OpenAI-compatible chat completions; JSON mode is requested for planning.
+OpenAI-compatible chat completions. Used for:
+  - chat / chat_json      : one-shot text (planning, narrative)
+  - describe_image        : vision — what/who/where is in the query image
+  - chat_tools            : one turn of a tool-calling agent loop
+No key => every function returns None and the engine runs deterministically.
 """
+import base64
 import json
 import logging
 import os
@@ -77,11 +77,94 @@ def chat(system, user, *, json_mode=False, max_tokens=1200, temperature=0.2):
         return None
 
 
-def chat_json(system, user, **kwargs):
-    """chat() in JSON mode, parsed. Returns dict or None."""
-    text = chat(system, user, json_mode=True, **kwargs)
-    if not text:
+def _post(payload):
+    """POST a chat completion. Returns the parsed JSON body or None."""
+    key = api_key()
+    if not key:
         return None
+    headers = {'Authorization': f'Bearer {key}',
+               'Content-Type': 'application/json'}
+    try:
+        resp = _provider.request('POST', CHAT_URL, json=payload,
+                                 headers=headers)
+    except Exception as e:
+        logger.warning('deepseek request failed: %s', e)
+        return None
+    if resp.status_code != 200:
+        logger.warning('deepseek HTTP %s: %s', resp.status_code,
+                       resp.text[:200])
+        return None
+    try:
+        return resp.json()
+    except ValueError:
+        logger.warning('deepseek: non-JSON body')
+        return None
+
+
+def image_part(image_bytes, mime='image/jpeg'):
+    """OpenAI-style image content part from raw bytes (inline base64)."""
+    b64 = base64.b64encode(image_bytes).decode('ascii')
+    return {'type': 'image_url',
+            'image_url': {'url': f'data:{mime};base64,{b64}'}}
+
+
+def describe_image(image_bytes, prompt, *, mime='image/jpeg', max_tokens=700,
+                   json_mode=True):
+    """Vision call: `prompt` + the image. Returns dict (json_mode) or text."""
+    payload = {
+        'model': MODEL,
+        'messages': [{'role': 'user', 'content': [
+            {'type': 'text', 'text': prompt}, image_part(image_bytes, mime)]}],
+        'max_tokens': max_tokens,
+        'temperature': 0.1,
+    }
+    if json_mode:
+        payload['response_format'] = {'type': 'json_object'}
+    body = _post(payload)
+    if not body:
+        return None
+    try:
+        text = body['choices'][0]['message']['content'] or ''
+    except (KeyError, IndexError, TypeError):
+        return None
+    return _loads_lenient(text) if json_mode else text
+
+
+def chat_tools(messages, tools, *, max_tokens=900, temperature=0.1,
+               tool_choice='auto'):
+    """One agent turn. Returns the assistant message dict
+    ({'role','content','tool_calls'?}) plus usage, or None on failure."""
+    payload = {
+        'model': MODEL,
+        'messages': messages,
+        'tools': tools,
+        'tool_choice': tool_choice,
+        'max_tokens': max_tokens,
+        'temperature': temperature,
+    }
+    body = _post(payload)
+    if not body:
+        return None
+    try:
+        msg = body['choices'][0]['message']
+    except (KeyError, IndexError, TypeError):
+        logger.warning('deepseek: unexpected tool response shape')
+        return None
+    msg.setdefault('content', '')
+    msg['_usage'] = body.get('usage') or {}
+    return msg
+
+
+def parse_tool_args(tool_call):
+    """Arguments of a tool call as a dict (never raises)."""
+    try:
+        raw = tool_call['function'].get('arguments') or '{}'
+        return json.loads(raw) if isinstance(raw, str) else dict(raw)
+    except Exception:
+        return {}
+
+
+def _loads_lenient(text):
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -91,5 +174,13 @@ def chat_json(system, user, **kwargs):
                 return json.loads(text[start:end + 1])
             except json.JSONDecodeError:
                 pass
-    logger.warning('deepseek: non-JSON planning output')
+    logger.warning('deepseek: non-JSON output')
     return None
+
+
+def chat_json(system, user, **kwargs):
+    """chat() in JSON mode, parsed. Returns dict or None."""
+    text = chat(system, user, json_mode=True, **kwargs)
+    if not text:
+        return None
+    return _loads_lenient(text)

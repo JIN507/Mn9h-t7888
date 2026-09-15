@@ -49,9 +49,26 @@ export default function useJob(jobId) {
             setStatus('error');
             es.close();
         });
-        // 'keepalive' events end the stream on purpose — EventSource reconnects
+        // 'keepalive' events end the stream on purpose — EventSource reconnects.
+        // But if the job itself is gone (server restarted, job expired) the
+        // stream 404s forever: check the job once per reconnect and bail.
+        es.onerror = async () => {
+            try {
+                const r = await fetch(`/api/jobs/${jobId}`);
+                if (r.status === 404) {
+                    setError('انتهت المهمة على الخادم دون نتيجة (أُعيد تشغيل الخادم؟) — أعد المحاولة');
+                    setStatus('error');
+                    es.close();
+                }
+            } catch { /* network blip — let EventSource retry */ }
+        };
+        const deadline = setTimeout(() => {
+            setError('استغرقت المهمة وقتاً أطول من المتوقع — أعد المحاولة');
+            setStatus('error');
+            es.close();
+        }, 6 * 60 * 1000);
 
-        return () => es.close();
+        return () => { clearTimeout(deadline); es.close(); };
     }, [jobId]);
 
     return { status, progress, result, error };

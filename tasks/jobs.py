@@ -154,7 +154,8 @@ def run_direct_search(query=None, image_url=None, user_id=None,
             } for i in origin['timeline']]
             raw = {k: origin.get(k) for k in
                    ('timeline', 'engine', 'first_seen', 'narrative',
-                    'engines', 'stats', 'rounds', 'note')}
+                    'engines', 'stats', 'rounds', 'note', 'agent',
+                    'earlier_hints')}
             origin['search_id'] = persist_search(
                 user_id, 'direct', query=None, image_url=image_url,
                 image_hash=image_hash, image_phash=image_phash,
@@ -254,8 +255,15 @@ def _run_origin_engine(image_url):
     """investigate_origin() -> page payload, or None when the engine could
     not run (missing key, unexpected crash). Never raises."""
     from services.origin_engine import investigate_origin, to_search_payload
+    from services.origin_agent import investigate as agent_investigate
+    from providers import deepseek
+    use_agent = (os.environ.get('ORIGIN_AGENT', 'true').lower() == 'true'
+                 and deepseek.configured())
     try:
-        report = investigate_origin(image_url, progress=_progress)
+        if use_agent:
+            report = agent_investigate(image_url, progress=_progress)
+        else:
+            report = investigate_origin(image_url, progress=_progress)
     except Exception:
         logger.exception('origin engine crashed; falling back')
         return None

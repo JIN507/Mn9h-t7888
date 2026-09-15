@@ -23,7 +23,7 @@ class SerpApiProvider(BaseProvider):
 _provider = SerpApiProvider()
 
 
-def lens_matches(image_url, lens_type, hl='ar', country='sa'):
+def lens_matches(image_url, lens_type, hl='ar', country='sa', no_cache=False):
     """One Google Lens call (`type=exact_matches` or `visual_matches`).
 
     Returns normalized match dicts tagged by the response section they
@@ -39,6 +39,8 @@ def lens_matches(image_url, lens_type, hl='ar', country='sa'):
         'hl': hl,
         'country': country,
     }
+    if no_cache:
+        params['no_cache'] = 'true'   # SerpAPI: bypass its cached (empty) answer
     resp = _provider.request('GET', SEARCH_URL, params=params)
     logger.info('google_lens type=%s status=%s', lens_type, resp.status_code)
     if resp.status_code != 200:

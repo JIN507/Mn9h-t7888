@@ -27,8 +27,13 @@ const VISUAL_LABELS = {
 
 const ENGINE_LABELS = {
     lens_exact_en: 'Lens (EN)', lens_exact_ar: 'Lens (AR)', lens_visual: 'Lens مشابه',
-    vision: 'Google Vision', tineye: 'TinEye', yandex: 'Yandex',
-    lens_pivot: 'Lens (الأصل)', text_pivot: 'بحث نصي',
+    vision: 'Google Vision', tineye: 'TinEye', tineye_web: 'TinEye (موقع)', yandex: 'Yandex',
+    bing: 'Bing', bing_web: 'Bing (موقع)', lens_pivot: 'Lens (الأصل)', text_pivot: 'بحث نصي',
+};
+
+const TOOL_LABELS = {
+    reverse_search: 'بحث عكسي', inspect_pages: 'فحص صفحات', web_search: 'بحث نصي',
+    read_page: 'قراءة صفحة', finish: 'الخلاصة',
 };
 
 const EVIDENCE_LABELS = {
@@ -123,6 +128,8 @@ const ReverseSearch = () => {
             stats: payload.stats || {},
             rounds: payload.rounds || [],
             note: payload.note || null,
+            agent: payload.agent || null,
+            earlierHints: payload.earlier_hints || [],
         } : null);
         if (timelineData.length > 0) {
             setTimelineResult(timelineData);
@@ -391,6 +398,21 @@ const ReverseSearch = () => {
                         <p className="text-sm text-slate-500">لم يُعثر على ظهور مؤرَّخ ومؤكد بصرياً — راجع الجدول الزمني أدناه.</p>
                     )}
 
+                    {originReport.earlierHints?.length > 0 && (
+                        <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-xl">
+                            <p className="text-[11px] font-bold text-amber-800 mb-1">مؤشرات أقدم لكن تأريخها ضعيف (تحتاج تحققاً يدوياً):</p>
+                            <ul className="space-y-0.5">
+                                {originReport.earlierHints.map((h, i) => (
+                                    <li key={i} className="text-[11px] text-amber-900 flex items-center gap-2 flex-wrap">
+                                        <span className="font-bold" dir="ltr">{h.is_lower_bound ? 'ليس قبل ' : ''}{(h.published_at || '').slice(0, 10)}</span>
+                                        <a href={h.url} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline break-all line-clamp-1" dir="ltr">{h.domain}{h.is_listing ? ' (صفحة فهرس)' : ''}</a>
+                                        <span className="text-amber-700">{(h.evidence || []).slice(0, 2).map(e => evidenceLabel(e.source)).join(' · ')}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
                     {originReport.narrative && (
                         <p className="text-sm text-slate-700 leading-relaxed mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100">{originReport.narrative}</p>
                     )}
@@ -398,12 +420,45 @@ const ReverseSearch = () => {
                     {Object.keys(originReport.engines || {}).length > 0 && (
                         <div className="flex items-center gap-1.5 flex-wrap mt-4">
                             {Object.entries(originReport.engines).map(([name, st]) => (
-                                <span key={name} title={st.note || ''}
+                                <span key={name} title={st.note || st.caption || ''}
                                     className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${st.ok ? 'bg-white text-slate-600 border-slate-200' : 'bg-slate-50 text-slate-400 border-slate-100 line-through'}`}>
-                                    {ENGINE_LABELS[name] || name}{st.ok ? ` ${st.count}` : ''}
+                                    {ENGINE_LABELS[name.replace('@pivot', '')] || name}{name.includes('@pivot') ? ' ↺' : ''}{st.ok ? ` ${st.count}` : ''}
                                 </span>
                             ))}
                         </div>
+                    )}
+
+                    {originReport.agent && (
+                        <details className="mt-4 group">
+                            <summary className="cursor-pointer text-xs font-bold text-slate-600 select-none">
+                                خطوات التحقيق ({(originReport.agent.steps || []).length}) · {originReport.agent.model}
+                                {originReport.agent.pick && (
+                                    <span className={`mr-2 text-[10px] px-2 py-0.5 rounded-md ${originReport.agent.pick_matches_first_seen ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                        {originReport.agent.pick_matches_first_seen ? 'استنتاج الوكيل يطابق الأدلة' : 'استنتاج الوكيل يختلف عن الأدلة'}
+                                    </span>
+                                )}
+                            </summary>
+                            {originReport.agent.image_context?.description && (
+                                <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                                    <span className="font-bold text-slate-600">ما تراه الرؤية الآلية: </span>
+                                    {originReport.agent.image_context.description}
+                                    {originReport.agent.image_context.event_guess && ` · حدث محتمل: ${originReport.agent.image_context.event_guess}`}
+                                </p>
+                            )}
+                            <ol className="mt-2 space-y-1">
+                                {(originReport.agent.steps || []).map((s) => (
+                                    <li key={s.n} className="flex items-start gap-2 text-[11px] text-slate-600">
+                                        <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center text-[10px] font-bold shrink-0">{s.n}</span>
+                                        <span><span className="font-bold text-slate-700">{TOOL_LABELS[s.tool] || s.tool}</span> — {s.summary} <span className="text-slate-400">({s.elapsed_s}s)</span></span>
+                                    </li>
+                                ))}
+                            </ol>
+                            {originReport.agent.finish?.reasoning && (
+                                <p className="text-[11px] text-slate-600 mt-2 p-2 bg-white rounded-lg border border-slate-100" dir="auto">
+                                    {originReport.agent.finish.reasoning}
+                                </p>
+                            )}
+                        </details>
                     )}
                 </GlassCard>
             )}
