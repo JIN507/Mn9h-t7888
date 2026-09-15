@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Film, AlertTriangle, Video, Globe, Search, ScanFace, ShieldCheck, PlayCircle, Music, X, Loader2 } from 'lucide-react';
 import apiClient from '../services/apiClient';

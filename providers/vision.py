@@ -27,6 +27,11 @@ if VISION_API_AVAILABLE and not os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
         logger.info('Google Cloud credentials set from local file')
 
 
+def configured():
+    return bool(VISION_API_AVAILABLE
+                and os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'))
+
+
 def vision_web_detection(image_url):
     """Web Detection matches, normalized. Empty list on any failure.
 

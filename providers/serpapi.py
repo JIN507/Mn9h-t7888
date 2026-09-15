@@ -23,19 +23,21 @@ class SerpApiProvider(BaseProvider):
 _provider = SerpApiProvider()
 
 
-def lens_matches(image_url, lens_type):
+def lens_matches(image_url, lens_type, hl='ar', country='sa'):
     """One Google Lens call (`type=exact_matches` or `visual_matches`).
 
     Returns normalized match dicts tagged by the response section they
     came from: exact_matches -> 'exact', visual_matches -> 'similar'.
+    Locale defaults to ar/SA; the origin engine also fans out to en/US
+    because Google's index differs per market.
     """
     params = {
         'engine': 'google_lens',
         'url': image_url,
         'type': lens_type,
         'api_key': os.environ.get('SERPAPI_API_KEY'),
-        'hl': 'ar',
-        'country': 'sa',
+        'hl': hl,
+        'country': country,
     }
     resp = _provider.request('GET', SEARCH_URL, params=params)
     logger.info('google_lens type=%s status=%s', lens_type, resp.status_code)
@@ -56,13 +58,16 @@ def lens_matches(image_url, lens_type):
             link = item.get('link')
             if not link:
                 continue
-            matches.append(Candidate(
+            match = Candidate(
                 link=link,
                 title=item.get('title', ''),
                 thumbnail=item.get('thumbnail') or item.get('image'),
                 match_type=match_type,
                 provider='google_lens',
-            ).to_dict())
+            ).to_dict()
+            if item.get('image'):
+                match['image_url'] = item['image']
+            matches.append(match)
     return matches
 
 

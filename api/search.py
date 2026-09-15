@@ -157,15 +157,19 @@ def direct_search_api():
             cached = find_cached_search('direct', image_hash)
             if cached and cached.raw_response:
                 logger.info('Direct-search cache hit: hash=%s', image_hash)
-                return jsonify({
+                payload = {k: v for k, v in cached.raw_response.items()
+                           if k in ('timeline', 'engine', 'first_seen',
+                                    'narrative', 'engines', 'stats',
+                                    'rounds', 'note')}
+                payload.update({
                     'success': True,
-                    'timeline': cached.raw_response.get('timeline', []),
+                    'timeline': payload.get('timeline') or [],
                     'total': cached.result_count,
                     'cached': True,
                     'search_id': cached.id,
-                    'engine': cached.raw_response.get('engine'),
-                    'raw': {}
+                    'raw': {},
                 })
+                return jsonify(payload)
 
         from auth import get_current_user
         from tasks.jobs import run_direct_search

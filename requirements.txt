@@ -29,6 +29,7 @@ pydub>=0.25.1
 SpeechRecognition>=3.10.0
 deep-translator>=1.11.4
 dateparser>=1.2.0
+htmldate>=1.8.0
 
 # تحليل الويب والأتمتة (Scraping)
 beautifulsoup4>=4.12.2

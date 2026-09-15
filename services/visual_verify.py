@@ -144,8 +144,37 @@ def extract_candidate_images(html, base_url):
 
 # ---------------------------------------------------------- verification
 
+def fetch_page(url, timeout=(5, 10)):
+    """GET a candidate page. Returns the Response or None (never raises)."""
+    try:
+        page = requests.get(url, headers=UA, timeout=timeout)
+        page.raise_for_status()
+        return page
+    except Exception as e:
+        logger.info('fetch_page failed for %s: %s', url, e)
+        return None
+
+
 def fetch_and_verify(url, query_sig, max_images=3, timeout=(5, 10)):
     """Verify that `url`'s page actually shows the query image."""
+    page = fetch_page(url, timeout=timeout)
+    if page is None:
+        return {'url': url, 'verdict': 'error', 'match_kind': None,
+                'similarity': None, 'phash_distance': None,
+                'matched_image_url': None, 'checked_images': 0}
+    return verify_html(page.text, url, query_sig, max_images=max_images,
+                       timeout=timeout)
+
+
+def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
+                extra_image_urls=None, keep_bytes=False):
+    """Verify against an already-fetched page body.
+
+    extra_image_urls: engine-reported image URLs for this page (TinEye /
+    Vision) checked first — they are the engine's own pointer to the match.
+    keep_bytes: also return the matched image bytes + headers (for EXIF /
+    Last-Modified evidence) under 'matched_image_bytes'/'matched_headers'.
+    """
     import io
     from PIL import Image
 
@@ -153,14 +182,14 @@ def fetch_and_verify(url, query_sig, max_images=3, timeout=(5, 10)):
            'similarity': None, 'phash_distance': None,
            'matched_image_url': None, 'checked_images': 0}
 
-    try:
-        page = requests.get(url, headers=UA, timeout=timeout)
-        page.raise_for_status()
-    except Exception as e:
-        logger.info('fetch_and_verify: page fetch failed for %s: %s', url, e)
-        return out
-
-    candidates = extract_candidate_images(page.text, url)[:max_images]
+    candidates = []
+    for extra in extra_image_urls or []:
+        if extra and extra.startswith('http') and extra not in candidates:
+            candidates.append(extra)
+    for found in extract_candidate_images(html or '', url):
+        if found not in candidates:
+            candidates.append(found)
+    candidates = candidates[:max_images + len(extra_image_urls or [])]
     if not candidates:
         out['verdict'] = 'no_image'
         return out
@@ -168,6 +197,7 @@ def fetch_and_verify(url, query_sig, max_images=3, timeout=(5, 10)):
     best_sim = None
     best_dist = None
     best_url = None
+    best_blob = None
 
     for img_url in candidates:
         try:
@@ -187,7 +217,11 @@ def fetch_and_verify(url, query_sig, max_images=3, timeout=(5, 10)):
             best_dist = distance
             if distance <= PHASH_SAME_MAX_DISTANCE:
                 out.update(verdict='confirmed', match_kind='exact',
-                           phash_distance=distance, matched_image_url=img_url)
+                           phash_distance=distance, matched_image_url=img_url,
+                           matched_size=pil.size)
+                if keep_bytes:
+                    out['matched_image_bytes'] = data
+                    out['matched_headers'] = dict(r.headers)
                 return out
 
         if query_sig.get('embedding') is not None:
@@ -195,11 +229,17 @@ def fetch_and_verify(url, query_sig, max_images=3, timeout=(5, 10)):
             if sim is not None and (best_sim is None or sim > best_sim):
                 best_sim = sim
                 best_url = img_url
+                best_blob = (data, dict(r.headers), pil.size)
 
     out['phash_distance'] = best_dist
     if best_sim is not None:
         out['similarity'] = round(best_sim, 4)
         out['matched_image_url'] = best_url
+        if best_blob is not None:
+            out['matched_size'] = best_blob[2]
+            if keep_bytes:
+                out['matched_image_bytes'] = best_blob[0]
+                out['matched_headers'] = best_blob[1]
         if best_sim >= SIM_CONFIRM:
             out.update(verdict='confirmed', match_kind='variant')
         elif best_sim >= SIM_AMBIGUOUS:

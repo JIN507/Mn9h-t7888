@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, RefreshCw, Layers, Calendar, ExternalLink, ImageIcon } from 'lucide-react';
+import { Search, RefreshCw, Layers, Calendar, ExternalLink, ImageIcon, Award, ShieldCheck, ShieldAlert, ShieldQuestion } from 'lucide-react';
 import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
 import ErrorBanner from '../components/ErrorBanner';
@@ -13,6 +13,46 @@ const MATCH_TYPE_LABELS = {
     exact: { text: 'مطابقة تامة', cls: 'bg-emerald-100 text-emerald-700' },
     similar: { text: 'صورة مشابهة', cls: 'bg-sky-100 text-sky-700' },
     page_match: { text: 'ذكر في صفحة', cls: 'bg-amber-100 text-amber-700' },
+    organic: { text: 'بحث نصي', cls: 'bg-violet-100 text-violet-700' },
+};
+
+// Visual verification verdicts (Origin Engine)
+const VISUAL_LABELS = {
+    confirmed: { text: 'مؤكدة بصرياً', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', Icon: ShieldCheck },
+    ambiguous: { text: 'تشابه جزئي', cls: 'bg-amber-50 text-amber-700 border-amber-200', Icon: ShieldQuestion },
+    unverified: { text: 'غير محقَّقة', cls: 'bg-slate-50 text-slate-500 border-slate-200', Icon: ShieldQuestion },
+    no_image: { text: 'بلا صورة', cls: 'bg-slate-50 text-slate-500 border-slate-200', Icon: ShieldQuestion },
+    error: { text: 'تعذّر الفحص', cls: 'bg-slate-50 text-slate-400 border-slate-200', Icon: ShieldAlert },
+};
+
+const ENGINE_LABELS = {
+    lens_exact_en: 'Lens (EN)', lens_exact_ar: 'Lens (AR)', lens_visual: 'Lens مشابه',
+    vision: 'Google Vision', tineye: 'TinEye', yandex: 'Yandex',
+    lens_pivot: 'Lens (الأصل)', text_pivot: 'بحث نصي',
+};
+
+const EVIDENCE_LABELS = {
+    'platform:twitter_snowflake': 'معرّف التغريدة', 'meta:article:published_time': 'وسم النشر',
+    'jsonld:datePublished': 'بيانات منظمة', 'jsonld:uploadDate': 'بيانات منظمة',
+    'htmldate:original': 'تاريخ الصفحة', 'url:path_date': 'مسار الرابط',
+    'wayback:first_capture': 'أرشيف الإنترنت', 'tineye:crawl_date': 'زحف TinEye',
+    'http:last-modified': 'ترويسة الملف', 'text:pattern_match': 'نص الصفحة',
+};
+
+const evidenceLabel = (src) => EVIDENCE_LABELS[src] || (src || '').split(':')[0];
+const pct = (v) => (typeof v === 'number' ? `${Math.round(v * 100)}%` : null);
+
+const VisualBadge = ({ visual }) => {
+    const v = VISUAL_LABELS[visual?.verdict] || null;
+    if (!v) return null;
+    const Icon = v.Icon;
+    return (
+        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border ${v.cls}`}>
+            <Icon className="w-3 h-3" />
+            {v.text}
+            {typeof visual?.similarity === 'number' && ` ${Math.round(visual.similarity * 100)}%`}
+        </span>
+    );
 };
 
 const ReverseSearch = () => {
@@ -68,6 +108,7 @@ const ReverseSearch = () => {
 
     const [timelineCached, setTimelineCached] = useState(false);
     const [timelineEngine, setTimelineEngine] = useState(null);
+    const [originReport, setOriginReport] = useState(null);
     const [jobId, setJobId] = useState(null);
     const { progress: jobProgress, result: jobResult, error: jobError } = useJob(jobId);
 
@@ -75,10 +116,18 @@ const ReverseSearch = () => {
         const timelineData = payload.timeline || [];
         setTimelineCached(Boolean(payload.cached));
         setTimelineEngine(payload.engine || null);
+        setOriginReport(payload.engine === 'origin_engine' ? {
+            firstSeen: payload.first_seen || null,
+            narrative: payload.narrative || null,
+            engines: payload.engines || {},
+            stats: payload.stats || {},
+            rounds: payload.rounds || [],
+            note: payload.note || null,
+        } : null);
         if (timelineData.length > 0) {
             setTimelineResult(timelineData);
         } else {
-            setErrors(prev => ({ ...prev, timeline: 'لم تتوفر تواريخ سابقة لهذه الصورة' }));
+            setErrors(prev => ({ ...prev, timeline: payload.note || 'لم تتوفر تواريخ سابقة لهذه الصورة' }));
         }
     };
 
@@ -91,6 +140,7 @@ const ReverseSearch = () => {
         setTimelineResult(null);
         setTimelineCached(false);
         setTimelineEngine(null);
+        setOriginReport(null);
         setJobId(null);
 
         // Prep form data for upload
@@ -189,6 +239,7 @@ const ReverseSearch = () => {
         setEnginesResult(null);
         setTimelineResult(null);
         setTimelineCached(false);
+        setOriginReport(null);
         setErrors({ engines: null, timeline: null });
     };
 
@@ -209,7 +260,7 @@ const ReverseSearch = () => {
                     البحث عن <span className="gradient-text">مصدر الصورة</span>
                 </h1>
                 <p className="text-slate-500 max-w-lg mx-auto">
-                    ارفع الصورة وسيقوم النظام بالبحث في محركات البحث واستخراج تاريخ ظهورها.
+                    ارفع الصورة وسيبحث النظام في عدة محركات، ويتحقق بصرياً من كل نتيجة، ويحدد أول ظهور موثّق لها ومن أعاد نشرها.
                 </p>
             </div>
 
@@ -279,6 +330,84 @@ const ReverseSearch = () => {
                 </div>
             )}
 
+            {/* First seen (Origin Engine) */}
+            {!loading && originReport && (originReport.firstSeen || originReport.narrative) && (
+                <GlassCard className="ai-result-card p-6 border-slate-200 shadow-sm mb-6 animate-fade-in-up">
+                    <div className="absolute top-0 left-0 right-0 h-1 rounded-t-2xl bg-gradient-to-r from-emerald-600 via-emerald-400 to-emerald-600" />
+                    <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-100">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center">
+                            <Award className="w-5 h-5 text-emerald-700" />
+                        </div>
+                        <div>
+                            <h2 className="font-bold text-slate-800">أول ظهور مؤكد للصورة</h2>
+                            {originReport.stats?.checked > 0 && (
+                                <p className="text-[11px] text-slate-400">
+                                    فُحصت {originReport.stats.checked} صفحة · مؤكدة بصرياً {originReport.stats.visually_confirmed || 0} · مؤرَّخة {originReport.stats.with_dates || 0}
+                                </p>
+                            )}
+                        </div>
+                    </div>
+
+                    {originReport.firstSeen ? (
+                        <div className="flex flex-col md:flex-row gap-4">
+                            {originReport.firstSeen.thumbnail && (
+                                <img src={originReport.firstSeen.thumbnail} alt="" className="w-full md:w-40 h-32 object-cover rounded-xl border border-slate-200" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap mb-2">
+                                    <span className="text-sm font-black px-3 py-1 bg-emerald-100 text-emerald-800 rounded-lg">
+                                        {originReport.firstSeen.is_upper_bound ? 'على الأقل منذ ' : ''}<span dir="ltr">{(originReport.firstSeen.published_at || '').slice(0, 10)}</span>
+                                    </span>
+                                    {pct(originReport.firstSeen.confidence) && (
+                                        <span className="text-[11px] font-bold text-slate-500">ثقة {pct(originReport.firstSeen.confidence)}</span>
+                                    )}
+                                    <VisualBadge visual={originReport.firstSeen.visual} />
+                                    {MATCH_TYPE_LABELS[originReport.firstSeen.match_type] && (
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${MATCH_TYPE_LABELS[originReport.firstSeen.match_type].cls}`}>
+                                            {MATCH_TYPE_LABELS[originReport.firstSeen.match_type].text}
+                                        </span>
+                                    )}
+                                </div>
+                                <h3 className="font-bold text-slate-800 text-sm mb-1 line-clamp-2">{originReport.firstSeen.title}</h3>
+                                <a href={originReport.firstSeen.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-600 hover:text-blue-800 break-all line-clamp-1" dir="ltr">
+                                    {originReport.firstSeen.url}
+                                </a>
+                                {originReport.firstSeen.evidence?.length > 0 && (
+                                    <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                                        <span className="text-[10px] text-slate-400">الأدلة:</span>
+                                        {originReport.firstSeen.evidence.slice(0, 4).map((e, i) => (
+                                            <span key={i} className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md" title={`${e.source} · ${e.date}`}>
+                                                {evidenceLabel(e.source)} {pct(e.confidence)}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                                {originReport.firstSeen.captured_at && (
+                                    <p className="text-[10px] text-slate-400 mt-1">تاريخ التقاط الصورة (EXIF): <span dir="ltr">{originReport.firstSeen.captured_at.slice(0, 10)}</span></p>
+                                )}
+                            </div>
+                        </div>
+                    ) : (
+                        <p className="text-sm text-slate-500">لم يُعثر على ظهور مؤرَّخ ومؤكد بصرياً — راجع الجدول الزمني أدناه.</p>
+                    )}
+
+                    {originReport.narrative && (
+                        <p className="text-sm text-slate-700 leading-relaxed mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100">{originReport.narrative}</p>
+                    )}
+
+                    {Object.keys(originReport.engines || {}).length > 0 && (
+                        <div className="flex items-center gap-1.5 flex-wrap mt-4">
+                            {Object.entries(originReport.engines).map(([name, st]) => (
+                                <span key={name} title={st.note || ''}
+                                    className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${st.ok ? 'bg-white text-slate-600 border-slate-200' : 'bg-slate-50 text-slate-400 border-slate-100 line-through'}`}>
+                                    {ENGINE_LABELS[name] || name}{st.ok ? ` ${st.count}` : ''}
+                                </span>
+                            ))}
+                        </div>
+                    )}
+                </GlassCard>
+            )}
+
             {/* Results */}
             {!loading && hasAnyResult && (
                 <div className="grid md:grid-cols-2 gap-6 animate-fade-in-up delay-100">
@@ -327,7 +456,7 @@ const ReverseSearch = () => {
                             <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center">
                                 <Calendar className="w-5 h-5 text-slate-700" />
                             </div>
-                            <h2 className="font-bold text-slate-800">الجدول الزمني</h2>
+                            <h2 className="font-bold text-slate-800">{originReport ? 'الجدول الزمني — من نشرها وأعاد نشرها' : 'الجدول الزمني'}</h2>
                         </div>
 
                         <ErrorBanner message={errors.timeline} className="mb-4" />
@@ -354,20 +483,40 @@ const ReverseSearch = () => {
 
                         {timelineResult ? (
                             <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1" dir="ltr">
-                                {timelineResult.map((item, idx) => (
-                                    <div key={idx} className="bg-white p-3 rounded-xl border border-slate-200 text-left">
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                            <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md">{item.date_found}</span>
-                                            {MATCH_TYPE_LABELS[item.type] && (
-                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${MATCH_TYPE_LABELS[item.type].cls}`}>
-                                                    {MATCH_TYPE_LABELS[item.type].text}
-                                                </span>
+                                {timelineResult.map((item, idx) => {
+                                    const isFirst = originReport?.firstSeen && item.link === originReport.firstSeen.url;
+                                    return (
+                                        <div key={idx} className={`bg-white p-3 rounded-xl border text-left ${isFirst ? 'border-emerald-300 ring-1 ring-emerald-100' : 'border-slate-200'}`}>
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${item.published_at ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500'}`}>{item.date_found}</span>
+                                                {isFirst && <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700">الأول</span>}
+                                                {MATCH_TYPE_LABELS[item.type] && (
+                                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${MATCH_TYPE_LABELS[item.type].cls}`}>
+                                                        {MATCH_TYPE_LABELS[item.type].text}
+                                                    </span>
+                                                )}
+                                                {item.visual && <VisualBadge visual={item.visual} />}
+                                                {pct(item.confidence) && item.published_at && (
+                                                    <span className="text-[10px] text-slate-400">ثقة {pct(item.confidence)}</span>
+                                                )}
+                                            </div>
+                                            <h4 className="font-bold text-xs text-slate-800 mt-2 mb-1 line-clamp-2" dir="rtl">{item.title}</h4>
+                                            <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-600 hover:text-blue-800 break-all line-clamp-1">{item.link}</a>
+                                            {(item.evidence?.length > 0 || item.providers?.length > 0) && (
+                                                <div className="flex items-center gap-1 flex-wrap mt-1.5" dir="rtl">
+                                                    {(item.evidence || []).slice(0, 3).map((e, i) => (
+                                                        <span key={i} className="text-[9px] px-1.5 py-0.5 bg-slate-50 text-slate-500 rounded border border-slate-100" title={`${e.source} · ${e.date}`}>
+                                                            {evidenceLabel(e.source)}
+                                                        </span>
+                                                    ))}
+                                                    {item.providers?.length > 0 && (
+                                                        <span className="text-[9px] text-slate-400" dir="ltr">{item.providers.join(' · ')}</span>
+                                                    )}
+                                                </div>
                                             )}
                                         </div>
-                                        <h4 className="font-bold text-xs text-slate-800 mt-2 mb-1 line-clamp-2" dir="rtl">{item.title}</h4>
-                                        <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-600 hover:text-blue-800 break-all line-clamp-1">{item.link}</a>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         ) : (
                             !errors.timeline && <div className="text-center text-slate-400 py-6 text-sm">لا يوجد سجل تاريخي.</div>

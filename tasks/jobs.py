@@ -127,10 +127,11 @@ def run_direct_search(query=None, image_url=None, user_id=None,
                       image_hash=None, image_phash=None):
     """Timeline search as a background job (was the blocking /api/direct-search).
 
-    Zenserp with one retry (their failures are unbilled); when Zenserp stays
-    down in image mode, falls back to the Google Lens harvest so the search
-    ALWAYS returns something. Translation + visual verification also happen
-    here, off the web workers.
+    Image mode runs the Origin Engine (multi-engine harvest, dated + visually
+    verified sightings, bounded expansion). If the engine cannot run at all
+    it degrades to the legacy path: Zenserp with one retry, then the Google
+    Lens harvest — so the search ALWAYS returns something. Text mode is
+    Zenserp only.
     """
     from urllib.parse import urlparse
     from providers.zenserp import reverse_image_search, text_search
@@ -139,6 +140,29 @@ def run_direct_search(query=None, image_url=None, user_id=None,
                                          persist_search, parse_iso_datetime)
 
     image_mode = bool(image_url)
+    if image_mode:
+        origin = _run_origin_engine(image_url)
+        if origin is not None:
+            results = [{
+                'url': i.get('link'),
+                'title': i.get('title'),
+                'snippet': None,
+                'thumbnail': i.get('thumbnail'),
+                'domain': i.get('source'),
+                'published_at': parse_iso_datetime(i.get('published_at')),
+                'confidence': i.get('confidence'),
+            } for i in origin['timeline']]
+            raw = {k: origin.get(k) for k in
+                   ('timeline', 'engine', 'first_seen', 'narrative',
+                    'engines', 'stats', 'rounds', 'note')}
+            origin['search_id'] = persist_search(
+                user_id, 'direct', query=None, image_url=image_url,
+                image_hash=image_hash, image_phash=image_phash,
+                results=results, raw_response=raw)
+            _progress('اكتمل البحث')
+            return {'status': 200, 'payload': origin}
+        _progress('تعذّر تشغيل محرك المصدر — التبديل إلى البحث التقليدي...')
+
     engine = 'zenserp'
     zenserp_data = None
     last_error = None
@@ -224,6 +248,28 @@ def run_direct_search(query=None, image_url=None, user_id=None,
     if visual_summary is not None:
         payload['visual_verification'] = visual_summary
     return {'status': 200, 'payload': payload}
+
+
+def _run_origin_engine(image_url):
+    """investigate_origin() -> page payload, or None when the engine could
+    not run (missing key, unexpected crash). Never raises."""
+    from services.origin_engine import investigate_origin, to_search_payload
+    try:
+        report = investigate_origin(image_url, progress=_progress)
+    except Exception:
+        logger.exception('origin engine crashed; falling back')
+        return None
+    if not report.get('success'):
+        logger.warning('origin engine unavailable: %s', report.get('note'))
+        return None
+    engines = report.get('engines') or {}
+    broken = [n for n, e in engines.items()
+              if not e.get('ok') and e.get('note') != 'not configured']
+    if broken and not report.get('timeline'):
+        logger.warning('origin engine found nothing and %s failed; '
+                       'falling back to legacy search', broken)
+        return None
+    return to_search_payload(report)
 
 
 @_with_app_context
