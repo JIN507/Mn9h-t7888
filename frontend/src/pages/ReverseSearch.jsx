@@ -158,6 +158,7 @@ const ReverseSearch = () => {
             note: payload.note || null,
             agent: payload.agent || null,
             earlierHints: payload.earlier_hints || [],
+            scenes: payload.scenes || [],
         } : null);
         if (timelineData.length > 0) {
             setTimelineResult(timelineData);
@@ -433,6 +434,24 @@ const ReverseSearch = () => {
                         </div>
                     ) : (
                         <p className="text-sm text-slate-500">لم يُعثر على ظهور مؤرَّخ ومؤكد بصرياً — راجع الجدول الزمني أدناه.</p>
+                    )}
+
+                    {originReport.scenes?.length > 1 && (
+                        <div className="mt-3 grid sm:grid-cols-2 gap-2">
+                            {originReport.scenes.map((sc) => (
+                                <a key={sc.frame} href={sc.first_seen.url} target="_blank" rel="noopener noreferrer"
+                                    className="flex items-center gap-3 p-2.5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all">
+                                    <Thumb item={sc.first_seen} size="w-12 h-12" />
+                                    <div className="min-w-0">
+                                        <p className="text-[10px] text-slate-400">مشهد {sc.frame} — أول ظهور</p>
+                                        <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                                            <DatePill item={sc.first_seen} />
+                                            <PlatformPill url={sc.first_seen.url} />
+                                        </div>
+                                    </div>
+                                </a>
+                            ))}
+                        </div>
                     )}
 
                     {originReport.narrative && (

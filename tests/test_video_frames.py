@@ -63,6 +63,36 @@ def test_video_consensus_promotes_clustered_ambiguous_sightings():
     assert oe.video_consensus([amb(f'https://t{i}.example', '2026-03-08T10:00:00Z') for i in range(3)]) == 0
 
 
+def test_prioritize_by_frame_round_robins_scenes():
+    from services import origin_engine as oe
+
+    def cand(url, frame, mt='exact'):
+        return {'url': url, 'canonical': url, 'domain': oe.domain_of(url), 'match_type': mt,
+                'providers': ['google_lens'], 'crawl_date': None, 'is_image': False, 'frames': [frame]}
+    busy = [cand(f'https://fire{i}.example/p', 6) for i in range(40)]
+    quiet = [cand('https://officer.example/p', 1), cand('https://officer2.example/p', 1)]
+    flat = oe.prioritize(busy + quiet, 10, 3)
+    assert sum(1 for c in flat if 1 in c['frames']) <= 2          # may or may not fit
+    fair = oe.prioritize(busy + quiet, 10, 3, by_frame=True)
+    assert [c['url'] for c in fair[:2]] == ['https://officer.example/p', 'https://fire0.example/p']
+    assert sum(1 for c in fair if 1 in c['frames']) == 2          # the quiet scene is covered
+    assert len(fair) == 10 and len({c['url'] for c in fair}) == 10
+
+
+def test_earliest_by_frame_reports_each_scene():
+    from services import origin_engine as oe
+
+    def item(url, date, frames):
+        return {'url': url, 'published_at': date, 'confidence': 0.95, 'match_type': 'exact',
+                'frames': frames, 'visual': {'verdict': 'confirmed', 'match_kind': 'exact'}}
+    tl = [item('https://fire.example', '2026-03-08T00:00:00Z', [6]),
+          item('https://officer-old.example', '2022-04-29T00:00:00Z', [1]),
+          item('https://officer-new.example', '2026-04-05T00:00:00Z', [1, 6])]
+    scenes = oe.earliest_by_frame(tl)
+    assert scenes[1]['url'] == 'https://officer-old.example'
+    assert scenes[6]['url'] == 'https://fire.example'
+
+
 def test_youtube_storyboard_frames_are_candidate_images():
     from services.visual_verify import video_frame_urls
     urls = video_frame_urls('https://www.youtube.com/watch?v=IZ0ldhWOR1A&t=3s')

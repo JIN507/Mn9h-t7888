@@ -306,7 +306,7 @@ def _harvest(image_url, progress, engines_status, *, include_visual=True,
         engines_status[name] = {'ok': False, 'count': 0, 'note': note}
     for n, frame in enumerate((extra_frame_urls or [])[:MAX_EXTRA_FRAMES], start=2):
         tasks[f'lens_exact_en@frame{n}'] = (
-            lambda f=frame: _lens_exact_with_retry(f, 'en', 'us'))
+            lambda f=frame: _tag_frame(_lens_exact_with_retry(f, 'en', 'us'), n))
 
     matches = []
     # No context manager: a straggling engine must not block the run
@@ -336,6 +336,12 @@ def _harvest(image_url, progress, engines_status, *, include_visual=True,
     return matches
 
 
+def _tag_frame(matches, n):
+    for m in matches or []:
+        m['frame'] = n
+    return matches
+
+
 def merge_candidates(matches, seen=None):
     """Tier 0: dedupe by canonical URL, keep best bucket + all providers."""
     seen = seen or set()
@@ -353,8 +359,11 @@ def merge_candidates(matches, seen=None):
                 'url': link, 'canonical': canon, 'domain': domain_of(canon),
                 'title': m.get('title') or '', 'match_type': m.get('match_type', 'similar'),
                 'providers': [], 'engine_images': [], 'thumbnail': m.get('thumbnail'),
-                'crawl_date': None, 'is_image': is_image_url(canon),
+                'crawl_date': None, 'is_image': is_image_url(canon), 'frames': [],
             }
+        frame = m.get('frame', 1)
+        if frame not in entry['frames']:
+            entry['frames'].append(frame)
         if MATCH_RANK.get(m.get('match_type'), 9) < MATCH_RANK.get(entry['match_type'], 9):
             entry['match_type'] = m['match_type']
         if m.get('provider') and m['provider'] not in entry['providers']:
@@ -371,8 +380,30 @@ def merge_candidates(matches, seen=None):
     return list(merged.values())
 
 
-def prioritize(candidates, limit, per_domain):
-    """Exact/TinEye/multi-engine first; cap per domain; cap total."""
+def prioritize(candidates, limit, per_domain, by_frame=False):
+    """Exact/TinEye/multi-engine first; cap per domain; cap total.
+    by_frame (video): round-robin across the frames that produced the
+    candidates so one busy scene cannot crowd out the others."""
+    if by_frame:
+        groups = defaultdict(list)
+        for c in candidates:
+            groups[min(c.get('frames') or [1])].append(c)
+        if len(groups) > 1:
+            ranked = {f: prioritize(cs, limit, per_domain) for f, cs in groups.items()}
+            out, per, seen_urls = [], defaultdict(int), set()
+            while len(out) < limit and any(ranked.values()):
+                for f in sorted(ranked):
+                    while ranked[f]:
+                        c = ranked[f].pop(0)
+                        if c['canonical'] in seen_urls or per[c['domain']] >= per_domain:
+                            continue
+                        seen_urls.add(c['canonical'])
+                        per[c['domain']] += 1
+                        out.append(c)
+                        break
+                    if len(out) >= limit:
+                        break
+            return out
     def score(c):
         s = MATCH_RANK.get(c['match_type'], 9) * 10
         s -= 4 * min(len(c['providers']), 3)          # corroborated by engines
@@ -440,7 +471,7 @@ def inspect_candidate(cand, query_sig, *, use_wayback=True, strict=False):
         'confidence': 0.0, 'evidence': [], 'bound': None, 'is_upper_bound': False,
         'visual': {'verdict': 'unverified'}, 'captured_at': None,
         'image_size': None, 'snippet': '', 'origin_round': cand.get('round', 0),
-        'is_listing': is_listing_url(url),
+        'is_listing': is_listing_url(url), 'frames': cand.get('frames') or [1],
     }
     evidence = list(de.platform_date(url)) + list(de.url_path_date(url))
     bounds = []
@@ -686,6 +717,16 @@ def assess(timeline):
     return None
 
 
+def earliest_by_frame(timeline):
+    """Video mode: the earliest eligible sighting per source frame (scene).
+    Returns {frame_no: item} for frames that produced any eligible sighting."""
+    out = {}
+    for item in sorted([i for i in timeline if _eligible_first(i)], key=_first_seen_key):
+        for f in item.get('frames') or [1]:
+            out.setdefault(f, item)
+    return out
+
+
 def earlier_hints(timeline, first_seen, limit=5):
     """Visually-confirmed sightings dated EARLIER than first_seen that did
     not meet the first-seen bar (weak date, lower bound, listing page,
@@ -824,7 +865,7 @@ def _public_item(i):
     keep = ('url', 'domain', 'title', 'match_type', 'providers', 'thumbnail',
             'published_at', 'confidence', 'evidence', 'bound', 'is_upper_bound',
             'visual', 'captured_at', 'image_size', 'origin_round', 'is_listing',
-            'is_lower_bound', 'temporal_outlier', 'probable')
+            'is_lower_bound', 'temporal_outlier', 'probable', 'frames')
     item = {k: i.get(k) for k in keep}
     item['link'] = i['url']
     item['type'] = i['match_type']
@@ -879,7 +920,9 @@ def investigate_origin(image_url, *, progress=None, budget=None,
     seen = set()
     cands = merge_candidates(raw, seen)
     seen.update(c['canonical'] for c in cands)
-    chosen = prioritize(cands, budget['max_inspect'], budget['per_domain'])
+    n_frames = 1 + len(extra_frame_urls or [])
+    limit = min(48, budget['max_inspect'] + 5 * (n_frames - 1))
+    chosen = prioritize(cands, limit, budget['per_domain'], by_frame=n_frames > 1)
     progress(f'{len(cands)} مرشحاً فريداً — فحص {len(chosen)} صفحة...')
     timeline = inspect_many(chosen, query_sig, budget['workers'], progress)
     if extra_frame_urls:
@@ -951,6 +994,9 @@ def investigate_origin(image_url, *, progress=None, budget=None,
         'engine': 'origin_engine',
         'first_seen': _public_item(first_seen) if first_seen else None,
         'earlier_hints': [_public_item(i) for i in earlier_hints(timeline, first_seen)],
+        'scenes': ([{'frame': f, 'first_seen': _public_item(i)}
+                    for f, i in sorted(earliest_by_frame(timeline).items())]
+                   if extra_frame_urls else []),
         'timeline': [_public_item(i) for i in ordered],
         'stats': stats,
         'engines': engines_status,
@@ -1032,6 +1078,7 @@ def to_search_payload(report):
         'note': report.get('note'),
         'agent': report.get('agent'),
         'earlier_hints': report.get('earlier_hints') or [],
+        'scenes': report.get('scenes') or [],
         'raw': {},
     }
 

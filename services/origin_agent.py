@@ -295,6 +295,9 @@ class Investigation:
         social = [c for c in pend if oe.is_social(c['url'])]
         return {
             'current_first_seen': self.item_brief(fs) if fs else None,
+            **({'earliest_by_scene_frame': {str(f): self.item_brief(i) for f, i in
+                                             oe.earliest_by_frame(self.timeline).items()}}
+               if self.extra_frames else {}),
             'earliest_verified': [self.item_brief(i) for i in dated[:limit]],
             'counts': {'inspected': len(self.timeline),
                        'visually_confirmed': sum(1 for i in self.timeline
@@ -579,7 +582,10 @@ def _narrative(inv, image_context, first_seen, finish):
         lines.append(f"- {i['published_at']} | {i['domain']} | {i['title'][:80]} | "
                      f"ثقة {i['confidence']:.2f} | بصري {i['visual'].get('verdict')} | {ev}")
     hints = oe.earlier_hints(inv.timeline, first_seen)
+    scenes = oe.earliest_by_frame(inv.timeline) if inv.extra_frames else {}
+    scene_lines = '; '.join(f"الإطار {f}: {i['published_at'][:10]} {i['domain']}" for f, i in sorted(scenes.items()))
     user = ('وصف الصورة: ' + json.dumps((image_context or {}).get('description', ''), ensure_ascii=False)
+            + ('\nفيديو من عدة مشاهد — أول ظهور لكل إطار: ' + scene_lines if scenes else '')
             + '\nأول ظهور مؤكد: ' + (f"{first_seen['published_at']} على {first_seen['domain']} ({first_seen['url']})" if first_seen else 'لا يوجد')
             + '\nمؤشرات أقدم ضعيفة التأريخ (ليست مؤكدة): ' + ('; '.join(f"{h['published_at'][:10]} {h['domain']}" for h in hints) or 'لا يوجد')
             + '\nاستنتاج الوكيل: ' + ((finish or {}).get('reasoning') or 'لا يوجد')[:800]
@@ -636,7 +642,9 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
     raw = oe._harvest(search_url, progress, inv.engines_status,
                       extra_frame_urls=extra_frame_urls)
     cands = inv.add_candidates(raw, round_no=0)
-    chosen = oe.prioritize(cands, budget['round0_inspect'], budget['per_domain'])
+    n_frames = 1 + len(extra_frame_urls)
+    limit = min(48, budget['round0_inspect'] + 5 * (n_frames - 1))
+    chosen = oe.prioritize(cands, limit, budget['per_domain'], by_frame=n_frames > 1)
     progress(f'{len(cands)} مرشحاً فريداً — فحص {len(chosen)} صفحة...')
     inv.inspect(chosen)
     round0_first = inv.first_seen()
@@ -671,6 +679,9 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
         'engine': 'origin_engine',
         'first_seen': oe._public_item(first_seen) if first_seen else None,
         'earlier_hints': [oe._public_item(i) for i in oe.earlier_hints(inv.timeline, first_seen)],
+        'scenes': ([{'frame': f, 'first_seen': oe._public_item(i)}
+                    for f, i in sorted(oe.earliest_by_frame(inv.timeline).items())]
+                   if extra_frame_urls else []),
         'timeline': [oe._public_item(i) for i in ordered],
         'stats': stats,
         'engines': inv.engines_status,
