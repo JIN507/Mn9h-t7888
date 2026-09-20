@@ -87,8 +87,8 @@ def world(monkeypatch):
     monkeypatch.setattr(oe, 'verify_html',
                         lambda html, url, sig, **kw: dict(VERDICTS.get(url, {'verdict': 'no_image'})))
     monkeypatch.setattr(oa, '_download', lambda u: (b'\x89PNGfake', 'image/png'))
-    monkeypatch.setattr(oa, 'build_query_signature',
-                        lambda b: {'phash': 'p', 'dhash': 'd', 'embedding': [0.1]})
+    monkeypatch.setattr(oe, 'frame_signatures',
+                        lambda b, extra: {'phash': 'p', 'dhash': 'd', 'embedding': [0.1]})
     monkeypatch.setenv('SERPAPI_API_KEY', 'test')
     monkeypatch.setenv('ZENSERP_API_KEY', 'test')
     monkeypatch.setenv('DEEPSEEK_API_KEY', 'test')
@@ -248,10 +248,26 @@ def test_agent_grok_tool_returns_leads_or_error(world, monkeypatch):
     assert 'Grok' in report['agent']['steps'][0]['summary']
 
 
+def test_agent_video_mode_harvests_extra_frames(world, monkeypatch):
+    """Video mode: extra frames get their own Lens exact search and the
+    model is told it is looking at frames of one clip."""
+    _script_model(monkeypatch, world, [
+        [('finish', {'first_seen_url': None, 'reasoning': 'x', 'confidence': 'low'})],
+    ])
+    report = oa.investigate('https://r2.example/q.jpg',
+                            extra_frame_urls=['https://r2.example/f2.jpg', 'https://r2.example/f3.jpg'])
+    searched = {u for (u, t, hl) in world['lens'] if t == 'exact_matches'}
+    assert {'https://r2.example/f2.jpg', 'https://r2.example/f3.jpg'} <= searched
+    assert report['stats']['frames'] == 3
+    assert 'lens_exact_en@frame2' in report['engines']
+    first_user_msg = next(m for m in world['llm_messages'] if m.get('role') == 'user')
+    assert 'VIDEO' in first_user_msg['content']
+
+
 def test_agent_falls_back_to_deterministic_engine_without_key(world, monkeypatch):
     monkeypatch.setattr(oa.deepseek, 'configured', lambda: False)
     called = {}
-    def fake(u, progress=None, budget=None):
+    def fake(u, progress=None, budget=None, extra_frame_urls=None):
         called['u'] = u
         return {'success': True}
     monkeypatch.setattr(oe, 'investigate_origin', fake)

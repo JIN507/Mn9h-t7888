@@ -182,6 +182,13 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
            'similarity': None, 'phash_distance': None,
            'matched_image_url': None, 'checked_images': 0}
 
+    # Video mode: several query frames — a page showing ANY of them counts.
+    sigs = [s for s in (query_sig if isinstance(query_sig, list) else [query_sig]) if s]
+    if not sigs:
+        out['verdict'] = 'unverified'
+        return out
+    query_embeddings = [s['embedding'] for s in sigs if s.get('embedding') is not None]
+
     candidates = []
     engine_given = set()
     for extra in extra_image_urls or []:
@@ -214,7 +221,8 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
 
         out['checked_images'] += 1
 
-        distance = _hash_distance(query_sig, pil)
+        distances = [d for d in (_hash_distance(s, pil) for s in sigs) if d is not None]
+        distance = min(distances) if distances else None
         if distance is not None and (best_dist is None or distance < best_dist):
             best_dist = distance
             if distance <= PHASH_SAME_MAX_DISTANCE:
@@ -227,8 +235,11 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
                     out['matched_headers'] = dict(r.headers)
                 return out
 
-        if query_sig.get('embedding') is not None:
-            sim = cosine_similarity(query_sig['embedding'], embed_image(pil))
+        if query_embeddings:
+            cand_emb = embed_image(pil)
+            sims = [x for x in (cosine_similarity(q, cand_emb) for q in query_embeddings)
+                    if x is not None]
+            sim = max(sims) if sims else None
             if sim is not None and (best_sim is None or sim > best_sim):
                 best_sim = sim
                 best_url = img_url

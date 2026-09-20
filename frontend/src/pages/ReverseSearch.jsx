@@ -78,6 +78,7 @@ const PlatformPill = ({ url }) => {
 const ReverseSearch = () => {
     const location = useLocation();
     const [file, setFile] = useState(null);
+    const [extraFrames, setExtraFrames] = useState([]);   // video mode: more frames of the clip
     const [loading, setLoading] = useState(false);
 
     // States for the two tasks
@@ -100,13 +101,21 @@ const ReverseSearch = () => {
         }
     };
 
-    // Handle file passed from navigation
+    // Handle file / frames passed from navigation
     useEffect(() => {
-        if (location.state?.file) {
+        if (location.state?.frames?.length) {
+            const files = location.state.frames
+                .map((d, i) => dataURLtoFile(d, `frame-${i + 1}.jpg`)).filter(Boolean);
+            if (files.length) {
+                setFile(files[0]);
+                setExtraFrames(files.slice(1));
+            }
+        } else if (location.state?.file) {
             setFile(location.state.file);
+            setExtraFrames([]);
         } else if (location.state?.dataUrl) {
             const f = dataURLtoFile(location.state.dataUrl, location.state.fileName || 'image.jpg');
-            if (f) setFile(f);
+            if (f) { setFile(f); setExtraFrames([]); }
         }
     }, [location.state]);
 
@@ -206,11 +215,29 @@ const ReverseSearch = () => {
             return;
         }
 
+        // Video mode: host the other keyframes too, so the engine can match
+        // pages that show a different moment of the clip
+        let extraUrls = [];
+        if (extraFrames.length) {
+            try {
+                extraUrls = (await Promise.all(extraFrames.map(async (f) => {
+                    const fd = new FormData();
+                    fd.append('file', f);
+                    const r = await apiClient.post('/api/upload', fd, {
+                        headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 });
+                    return r.data?.imageUrl || null;
+                }))).filter(Boolean);
+            } catch (err) {
+                console.warn('extra frame upload failed', err);
+            }
+        }
+
         // Step 2: Timeline search — instant 200 on cache hit, else a
         // background job streamed over SSE (progress shown while it runs)
         try {
             const timelineRes = await apiClient.post('/api/direct-search', {
                 image_url: uploadedImageUrl,
+                ...(extraUrls.length ? { image_urls: [uploadedImageUrl, ...extraUrls] } : {}),
                 ...uploadedHashes,
                 rerun
             }, { timeout: 30000 });
@@ -258,6 +285,7 @@ const ReverseSearch = () => {
 
     const handleReset = () => {
         setFile(null);
+        setExtraFrames([]);
         setEnginesResult(null);
         setTimelineResult(null);
         setTimelineCached(false);
@@ -290,11 +318,19 @@ const ReverseSearch = () => {
             <div className="animate-fade-in-up delay-100">
                 <GlassCard className="p-6 border-slate-200 shadow-sm mb-8">
                     <DropZone
-                        onFileSelect={setFile}
+                        onFileSelect={(f) => { setFile(f); setExtraFrames([]); }}
                         headerText="ارفع صورة للبحث الشامل"
                         subText="JPG, PNG, WEBP"
                         initialFile={file}
                     />
+                    {extraFrames.length > 0 && (
+                        <div className="mt-3 flex items-center gap-2 flex-wrap">
+                            <span className="text-[11px] font-bold text-slate-600">وضع الفيديو — إطارات إضافية للمطابقة:</span>
+                            {extraFrames.map((f, i) => (
+                                <img key={i} src={URL.createObjectURL(f)} alt="" className="w-12 h-9 object-cover rounded-md border border-slate-200" />
+                            ))}
+                        </div>
+                    )}
                     <div className="mt-6 flex gap-3">
                         <button
                             onClick={() => handleSearch()}

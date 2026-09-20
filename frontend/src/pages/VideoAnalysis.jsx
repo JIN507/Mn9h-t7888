@@ -178,6 +178,7 @@ const VideoAnalysis = () => {
     const [loading, setLoading] = useState(false);
     const [aiLoading, setAiLoading] = useState(false);
     const [frames, setFrames] = useState(null);
+    const [keyframeIndices, setKeyframeIndices] = useState([]);
     const [aiResult, setAiResult] = useState(null);
     const [error, setError] = useState(null);
     const [jobId, setJobId] = useState(null);
@@ -203,6 +204,7 @@ const VideoAnalysis = () => {
                 timeout: 120000
             });
             setFrames(response.data.frames);
+            setKeyframeIndices(response.data.keyframe_indices || []);
         } catch (err) {
             console.error(err);
             setError(err.response?.data?.error || 'فشل استخراج الإطارات');
@@ -456,19 +458,33 @@ const VideoAnalysis = () => {
 
                     {frames && (
                         <div>
-                            <div className="flex items-center justify-between mb-6 bg-slate-900 text-white p-4 rounded-2xl shadow-lg">
+                            <div className="flex items-center justify-between gap-3 flex-wrap mb-6 bg-slate-900 text-white p-4 rounded-2xl shadow-lg">
                                 <h2 className="font-bold flex items-center">
                                     <Film className="w-5 h-5 ml-2 text-slate-400" />
                                     تم تفكيك ({frames.length}) إطارات متفرقة
                                 </h2>
-                                <p className="text-sm text-slate-400">انقر على إطار لتقوم بتحليله فوراً</p>
+                                <div className="flex items-center gap-3">
+                                    <p className="text-sm text-slate-400 hidden md:block">انقر على إطار لتقوم بتحليله فوراً</p>
+                                    <button
+                                        onClick={() => {
+                                            const picks = (keyframeIndices.length ? keyframeIndices : frames.map((_, i) => i).slice(0, 4))
+                                                .map((i) => frames[i]?.data).filter(Boolean);
+                                            navigate('/reverse-search', { state: { frames: picks, fileName: 'video-frame.jpg', autoSearch: true } });
+                                        }}
+                                        className="px-4 py-2 rounded-xl bg-white text-slate-900 font-bold text-sm hover:bg-slate-100 transition-colors flex items-center gap-2"
+                                        title="يبحث عن أول ظهور للفيديو باستخدام عدة إطارات مميزة"
+                                    >
+                                        <Search className="w-4 h-4" />
+                                        ابحث عن مصدر الفيديو
+                                    </button>
+                                </div>
                             </div>
 
                             <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                                 {frames.map((frame, idx) => (
                                     <div key={idx}
                                         onClick={() => setSelectedFrame(frame)}
-                                        className="group bg-white rounded-xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer relative"
+                                        className={`group bg-white rounded-xl overflow-hidden border shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer relative ${keyframeIndices.includes(idx) ? 'border-slate-800' : 'border-slate-200'}`}
                                     >
                                         <div className="aspect-video relative bg-slate-100">
                                             <img

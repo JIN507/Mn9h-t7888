@@ -205,6 +205,7 @@ class Investigation:
 
     def __init__(self, image_url, query_sig, progress, budget):
         self.image_url = image_url
+        self.image_bytes = None
         self.query_sig = query_sig
         self.progress = progress
         self.budget = budget
@@ -404,7 +405,7 @@ def tool_grok_search(inv, question):
     q = ((question or 'Find the earliest publication of this exact image.')
          + ' Search X (Twitter) and the web. List every URL you find with '
            'its date. Only include URLs you actually retrieved.')
-    res = xai.search_origin(inv.image_url, q)
+    res = xai.search_origin(inv.image_bytes or inv.image_url, q)
     if res.get('error'):
         inv.engines_status['grok'] = {'ok': False, 'count': 0, 'note': res['error'][:120]}
         return {'error': res['error']}
@@ -579,15 +580,18 @@ def _narrative(inv, image_context, first_seen, finish):
     return deepseek.chat(_NARRATIVE_SYSTEM, user, max_tokens=550, temperature=0.3)
 
 
-def investigate(image_url, *, progress=None, budget=None):
+def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None):
     """Agent-driven origin investigation. Returns an origin_engine-shaped
-    report with an extra `agent` block. Never raises."""
+    report with an extra `agent` block. Never raises.
+    extra_frame_urls: other frames of the same video (video mode)."""
     progress = progress or _noop
     budget = {**DEFAULT_BUDGET, **(budget or {})}
+    extra_frame_urls = [u for u in (extra_frame_urls or []) if u][:oe.MAX_EXTRA_FRAMES]
     if not os.environ.get('SERPAPI_API_KEY'):
         return oe._empty('SerpAPI key not configured')
     if not deepseek.configured():
-        return oe.investigate_origin(image_url, progress=progress)
+        return oe.investigate_origin(image_url, progress=progress,
+                                     extra_frame_urls=extra_frame_urls)
 
     started = time.monotonic()
     progress('جاري تحميل الصورة وتجهيز بصمتها...')
@@ -595,7 +599,7 @@ def investigate(image_url, *, progress=None, budget=None):
     query_sig = None
     try:
         image_bytes, mime = _download(image_url)
-        query_sig = build_query_signature(image_bytes)
+        query_sig = oe.frame_signatures(image_bytes, extra_frame_urls)
     except Exception as e:
         logger.warning('agent: cannot download query image: %s', e)
 
@@ -610,11 +614,20 @@ def investigate(image_url, *, progress=None, budget=None):
     search_url = oe.search_copy_url(image_bytes, image_url)
     inv = Investigation(search_url, query_sig, progress, budget)
     inv.original_url = image_url
+    inv.image_bytes = image_bytes
+    inv.extra_frames = extra_frame_urls
     inv.llm_calls += 1 if image_context is not None else 0
+    if extra_frame_urls and isinstance(image_context, dict):
+        image_context['video_mode'] = True
+        image_context['other_frames_of_same_video'] = extra_frame_urls
+        image_context['note'] = ('The query is a VIDEO: these are frames of one clip. '
+                                 'Pages may show a different moment of the same clip; '
+                                 'you can reverse_search with any frame URL.')
 
     # round 0: the deterministic harvest gives the model evidence to reason from
     progress('جاري البحث في المحركات (Lens, Yandex, TinEye)...')
-    raw = oe._harvest(search_url, progress, inv.engines_status)
+    raw = oe._harvest(search_url, progress, inv.engines_status,
+                      extra_frame_urls=extra_frame_urls)
     cands = inv.add_candidates(raw, round_no=0)
     chosen = oe.prioritize(cands, budget['round0_inspect'], budget['per_domain'])
     progress(f'{len(cands)} مرشحاً فريداً — فحص {len(chosen)} صفحة...')
@@ -642,7 +655,8 @@ def investigate(image_url, *, progress=None, budget=None):
         'visually_rejected': sum(1 for i in inv.timeline if i['visual']['verdict'] == 'rejected'),
         'ambiguous': sum(1 for i in inv.timeline if i['visual']['verdict'] == 'ambiguous'),
         'elapsed_s': round(time.monotonic() - started, 1),
-        'visual_verification': bool(query_sig and query_sig.get('embedding') is not None),
+        'visual_verification': oe._has_embedding(query_sig),
+        'frames': 1 + len(extra_frame_urls),
     }
     payload = {
         'success': True,

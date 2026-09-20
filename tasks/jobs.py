@@ -124,7 +124,7 @@ def run_xai_investigation(image_url, user_id=None):
 
 @_with_app_context
 def run_direct_search(query=None, image_url=None, user_id=None,
-                      image_hash=None, image_phash=None):
+                      image_hash=None, image_phash=None, extra_image_urls=None):
     """Timeline search as a background job (was the blocking /api/direct-search).
 
     Image mode runs the Origin Engine (multi-engine harvest, dated + visually
@@ -141,7 +141,7 @@ def run_direct_search(query=None, image_url=None, user_id=None,
 
     image_mode = bool(image_url)
     if image_mode:
-        origin = _run_origin_engine(image_url)
+        origin = _run_origin_engine(image_url, extra_image_urls)
         if origin is not None:
             results = [{
                 'url': i.get('link'),
@@ -251,9 +251,10 @@ def run_direct_search(query=None, image_url=None, user_id=None,
     return {'status': 200, 'payload': payload}
 
 
-def _run_origin_engine(image_url):
+def _run_origin_engine(image_url, extra_image_urls=None):
     """investigate_origin() -> page payload, or None when the engine could
-    not run (missing key, unexpected crash). Never raises."""
+    not run (missing key, unexpected crash). Never raises.
+    extra_image_urls: more frames of the same video (video mode)."""
     from services.origin_engine import investigate_origin, to_search_payload
     from services.origin_agent import investigate as agent_investigate
     from providers import deepseek
@@ -261,9 +262,11 @@ def _run_origin_engine(image_url):
                  and deepseek.configured())
     try:
         if use_agent:
-            report = agent_investigate(image_url, progress=_progress)
+            report = agent_investigate(image_url, progress=_progress,
+                                       extra_frame_urls=extra_image_urls)
         else:
-            report = investigate_origin(image_url, progress=_progress)
+            report = investigate_origin(image_url, progress=_progress,
+                                        extra_frame_urls=extra_image_urls)
     except Exception:
         logger.exception('origin engine crashed; falling back')
         return None

@@ -289,11 +289,20 @@ def harvest_engine(name, image_url):
         return [], {'ok': False, 'count': 0, 'note': str(e)[:120]}
 
 
-def _harvest(image_url, progress, engines_status, *, include_visual=True):
-    """Run every candidate generator in parallel. Returns raw match dicts."""
+MAX_EXTRA_FRAMES = 3
+
+
+def _harvest(image_url, progress, engines_status, *, include_visual=True,
+             extra_frame_urls=None):
+    """Run every candidate generator in parallel. Returns raw match dicts.
+    extra_frame_urls (video mode): more frames of the same clip, each gets
+    a Lens exact search of its own — pages often show a different moment."""
     tasks, unavailable = engine_table(image_url, include_visual=include_visual)
     for name, note in unavailable.items():
         engines_status[name] = {'ok': False, 'count': 0, 'note': note}
+    for n, frame in enumerate((extra_frame_urls or [])[:MAX_EXTRA_FRAMES], start=2):
+        tasks[f'lens_exact_en@frame{n}'] = (
+            lambda f=frame: _lens_exact_with_retry(f, 'en', 'us'))
 
     matches = []
     # No context manager: a straggling engine must not block the run
@@ -788,8 +797,25 @@ def _public_item(i):
 
 # --------------------------------------------------------------------- main
 
-def investigate_origin(image_url, *, progress=None, budget=None):
-    """Full origin investigation for a hosted image URL. Never raises."""
+def frame_signatures(primary_bytes, extra_frame_urls):
+    """Query signature list: the primary image + every downloadable extra
+    frame (video mode). A single dict when there are no extras."""
+    primary = build_query_signature(primary_bytes) if primary_bytes else None
+    if not extra_frame_urls:
+        return primary
+    sigs = [primary] if primary else []
+    for url in extra_frame_urls[:MAX_EXTRA_FRAMES]:
+        data = _download_bytes(url)
+        sig = build_query_signature(data) if data else None
+        if sig:
+            sigs.append(sig)
+    return sigs or None
+
+
+def investigate_origin(image_url, *, progress=None, budget=None,
+                       extra_frame_urls=None):
+    """Full origin investigation for a hosted image URL. Never raises.
+    extra_frame_urls: other frames of the same video (video mode)."""
     progress = progress or _noop
     budget = {**DEFAULT_BUDGET, **(budget or {})}
     started = time.monotonic()
@@ -805,12 +831,13 @@ def investigate_origin(image_url, *, progress=None, budget=None):
 
     progress('جاري تجهيز بصمة الصورة...')
     image_bytes = _download_bytes(image_url)
-    query_sig = build_query_signature(image_bytes) if image_bytes else None
+    query_sig = frame_signatures(image_bytes, extra_frame_urls)
     search_url = search_copy_url(image_bytes, image_url)
 
     # ---- round 0: harvest + inspect
     progress('جاري البحث في المحركات (Lens, Vision, TinEye, Yandex)...')
-    raw = _harvest(search_url, progress, engines_status)
+    raw = _harvest(search_url, progress, engines_status,
+                   extra_frame_urls=extra_frame_urls)
     seen = set()
     cands = merge_candidates(raw, seen)
     seen.update(c['canonical'] for c in cands)
@@ -872,7 +899,8 @@ def investigate_origin(image_url, *, progress=None, budget=None):
         'visually_rejected': sum(1 for i in timeline if i['visual']['verdict'] == 'rejected'),
         'ambiguous': sum(1 for i in timeline if i['visual']['verdict'] == 'ambiguous'),
         'elapsed_s': round(time.monotonic() - started, 1),
-        'visual_verification': bool(query_sig and query_sig.get('embedding') is not None),
+        'visual_verification': _has_embedding(query_sig),
+        'frames': 1 + len(extra_frame_urls or []),
     }
     payload = {
         'success': True,
@@ -962,6 +990,11 @@ def to_search_payload(report):
         'earlier_hints': report.get('earlier_hints') or [],
         'raw': {},
     }
+
+
+def _has_embedding(query_sig):
+    sigs = query_sig if isinstance(query_sig, list) else [query_sig]
+    return any(s and s.get('embedding') is not None for s in sigs)
 
 
 def _empty(note):

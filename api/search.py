@@ -132,6 +132,12 @@ def direct_search_api():
         data = request.get_json(silent=True) or {}
         query = data.get('query') or request.form.get('query')
         image_url = data.get('image_url') or request.form.get('image_url')
+        # Video mode: several frames of one clip; the first is the primary
+        image_urls = data.get('image_urls') if isinstance(data.get('image_urls'), list) else []
+        image_urls = [u for u in image_urls if isinstance(u, str) and u.startswith('http')]
+        if image_urls and not image_url:
+            image_url = image_urls[0]
+        extra_image_urls = [u for u in image_urls if u != image_url][:3]
         image_hash = data.get('image_hash') or request.form.get('image_hash')
         image_phash = data.get('image_phash') or request.form.get('image_phash')
         rerun = bool(data.get('rerun') or request.form.get('rerun'))
@@ -178,7 +184,8 @@ def direct_search_api():
         user = get_current_user()
         job = enqueue(run_direct_search, query=query, image_url=image_url,
                       user_id=user.id if user else None,
-                      image_hash=image_hash, image_phash=image_phash)
+                      image_hash=image_hash, image_phash=image_phash,
+                      extra_image_urls=extra_image_urls or None)
         return jsonify({
             'success': True,
             'job_id': job.id,

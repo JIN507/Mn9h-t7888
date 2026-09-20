@@ -44,10 +44,21 @@ def extract_frames_api():
         # Delete the uploaded file after processing
         os.remove(file_path)
         
+        # Distinct, usable frames for a video-origin search
+        keyframes = []
+        try:
+            import base64
+            from services.keyframes import select_keyframes
+            blobs = [base64.b64decode(f['data'].split(',', 1)[1]) for f in frames]
+            keyframes = select_keyframes(blobs, k=4)
+        except Exception as e:
+            logger.warning('keyframe selection failed: %s', e)
+
         return jsonify({
             'success': True,
             'frames': frames,
-            'frameCount': len(frames)
+            'frameCount': len(frames),
+            'keyframe_indices': keyframes,
         })
     except Exception as e:
         # Delete the uploaded file if an error occurs

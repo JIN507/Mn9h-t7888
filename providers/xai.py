@@ -41,15 +41,28 @@ def investigate_image(image_url):
     }
     headers = {
         'Content-Type': 'application/json',
-        'Authorization': f"Bearer {os.environ.get('XAI_API_KEY', '')}",
+        'Authorization': f'Bearer {api_key()}',
     }
     logger.info('xAI investigation started for %s', image_url)
     return _provider.request('POST', RESPONSES_URL, json=payload,
                              headers=headers, timeout=180)
 
 
+_KEY_NAMES = ('GROK_API_KEY', 'grok_key', 'GROK_KEY', 'XAI_API_KEY')
+
+
+def api_key():
+    """First non-empty xAI key; GROK_* names win over XAI_API_KEY so a fresh
+    funded key can sit next to an old unfunded one."""
+    for name in _KEY_NAMES:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return ''
+
+
 def configured():
-    return bool(os.environ.get('XAI_API_KEY')) and \
+    return bool(api_key()) and \
         os.environ.get('GROK_SEARCH', 'true').lower() != 'false'
 
 
@@ -58,6 +71,10 @@ def search_origin(image_url, question, model=None, timeout=120):
     {'text': str, 'urls': [..], 'error': str|None}. Never raises.
     (Grok's X search is the one tool that can surface the ORIGINAL post on
     X directly; its answer is a lead list — every URL must be inspected.)"""
+    if isinstance(image_url, (bytes, bytearray)):
+        # xAI's fetcher is refused by many image hosts: send the bytes inline
+        import base64
+        image_url = 'data:image/jpeg;base64,' + base64.b64encode(image_url).decode('ascii')
     payload = {
         'model': model or os.environ.get('GROK_MODEL', 'grok-4-fast'),
         'input': [{'role': 'user', 'content': [
@@ -66,7 +83,7 @@ def search_origin(image_url, question, model=None, timeout=120):
         'tools': [{'type': 'web_search'}, {'type': 'x_search'}],
     }
     headers = {'Content-Type': 'application/json',
-               'Authorization': f"Bearer {os.environ.get('XAI_API_KEY', '')}"}
+               'Authorization': f'Bearer {api_key()}'}
     try:
         resp = _provider.request('POST', RESPONSES_URL, json=payload,
                                  headers=headers, timeout=timeout)
