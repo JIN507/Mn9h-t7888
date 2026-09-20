@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Film, AlertTriangle, Video, Globe, Search, ScanFace, ShieldCheck, PlayCircle, Music, X, Loader2 } from 'lucide-react';
+import { Film, AlertTriangle, Video, Globe, Search, ScanFace, ShieldCheck, PlayCircle, Music, X, Loader2, RefreshCw } from 'lucide-react';
 import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
 import GradientButton from '../components/GradientButton';
 import DropZone from '../components/DropZone';
 import ErrorBanner from '../components/ErrorBanner';
 import useJob from '../hooks/useJob';
+import { FirstSeenCard, TimelineCard, parseOriginPayload } from '../components/OriginReport';
 
 // --- Components ---
 
@@ -184,9 +185,100 @@ const VideoAnalysis = () => {
     const [jobId, setJobId] = useState(null);
     const { progress: jobProgress, result: jobResult, error: jobError } = useJob(jobId);
 
-    // Tab State: 'ai' or 'frames'
+    // Tab State: 'ai' | 'frames' | 'origin'
     const [activeTab, setActiveTab] = useState('ai');
     const [selectedFrame, setSelectedFrame] = useState(null);
+
+    // فحص الفيديو — one-click origin investigation on auto-picked keyframes
+    const [originLoading, setOriginLoading] = useState(false);
+    const [originStage, setOriginStage] = useState('');
+    const [originPayload, setOriginPayload] = useState(null);
+    const [originFrames, setOriginFrames] = useState([]);      // data URLs used
+    const [originJobId, setOriginJobId] = useState(null);
+    const originJob = useJob(originJobId);
+
+    const dataUrlToBlob = (dataUrl) => {
+        const [meta, b64] = dataUrl.split(',');
+        const mime = (meta.match(/:(.*?);/) || [])[1] || 'image/jpeg';
+        const bin = atob(b64);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        return new Blob([arr], { type: mime });
+    };
+
+    const ensureFrames = async () => {
+        if (frames && frames.length) return { frames, keys: keyframeIndices };
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('frameInterval', '2');
+        const response = await apiClient.post('/api/extract-frames', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 });
+        setFrames(response.data.frames);
+        setKeyframeIndices(response.data.keyframe_indices || []);
+        return { frames: response.data.frames || [], keys: response.data.keyframe_indices || [] };
+    };
+
+    const handleVideoOrigin = async (rerun = false) => {
+        if (!file) return;
+        setOriginLoading(true);
+        setError(null);
+        setOriginPayload(null);
+        setOriginJobId(null);
+        try {
+            setOriginStage('تفكيك الفيديو واختيار الإطارات المميزة...');
+            const { frames: all, keys } = await ensureFrames();
+            const picks = (keys.length ? keys : all.map((_, i) => i).slice(0, 8)).map((i) => all[i]?.data).filter(Boolean);
+            if (!picks.length) throw new Error('لم يُستخرج أي إطار صالح من الفيديو');
+            setOriginFrames(picks);
+
+            setOriginStage(`رفع ${picks.length} إطارات للبحث...`);
+            const uploads = await Promise.all(picks.map(async (d, i) => {
+                const fd = new FormData();
+                fd.append('file', dataUrlToBlob(d), `frame-${i + 1}.jpg`);
+                const r = await apiClient.post('/api/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 });
+                return r.data;
+            }));
+            const urls = uploads.map((u) => u?.imageUrl).filter(Boolean);
+            if (!urls.length) throw new Error('فشل رفع الإطارات');
+
+            setOriginStage('جاري البحث عن مصدر الفيديو...');
+            const res = await apiClient.post('/api/direct-search', {
+                image_url: urls[0], image_urls: urls,
+                image_hash: uploads[0]?.image_hash, image_phash: uploads[0]?.image_phash, rerun,
+            }, { timeout: 30000 });
+            if (res.status === 202 && res.data.job_id) {
+                setOriginJobId(res.data.job_id);
+                return;                                  // continues via SSE
+            }
+            if (res.data?.success) {
+                setOriginPayload(res.data);
+            } else {
+                setError(res.data?.error || 'فشل فحص الفيديو');
+            }
+        } catch (err) {
+            console.error(err);
+            setError(err.response?.data?.error || err.message || 'فشل فحص الفيديو');
+        }
+        setOriginLoading(false);
+    };
+
+    useEffect(() => {
+        if (originJob.result) {
+            const payload = originJob.result.payload || {};
+            if (payload.success) setOriginPayload(payload);
+            else setError(payload.error || 'فشل فحص الفيديو');
+            setOriginLoading(false);
+            setOriginJobId(null);
+        }
+    }, [originJob.result]);
+
+    useEffect(() => {
+        if (originJob.error) {
+            setError(originJob.error);
+            setOriginLoading(false);
+            setOriginJobId(null);
+        }
+    }, [originJob.error]);
 
     const handleExtractFrames = async () => {
         if (!file) return;
@@ -292,6 +384,8 @@ const VideoAnalysis = () => {
                             setFile(f);
                             setFrames(null);
                             setAiResult(null);
+                            setOriginPayload(null);
+                            setOriginFrames([]);
                             setError(null);
                         }}
                         headerText="ارفع الفيديو هنا"
@@ -324,6 +418,16 @@ const VideoAnalysis = () => {
                     >
                         <Film className="w-4 h-4" /> استخراج الإطارات
                     </button>
+                    <button
+                        disabled={!file}
+                        onClick={() => setActiveTab('origin')}
+                        className={`px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all text-sm ${activeTab === 'origin'
+                                ? 'bg-slate-900 text-white shadow-sm'
+                                : 'text-slate-500 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed'
+                            }`}
+                    >
+                        <Search className="w-4 h-4" /> فحص الفيديو
+                    </button>
                 </div>
             </div>
 
@@ -331,6 +435,61 @@ const VideoAnalysis = () => {
             {error && (
                 <div className="animate-fade-in-up mb-6">
                     <ErrorBanner variant="panel" message={error} className="justify-center" />
+                </div>
+            )}
+
+            {/* Tab 3: فحص الفيديو — origin of the clip */}
+            {activeTab === 'origin' && file && (
+                <div className="animate-fade-in-up">
+                    {!originPayload && !originLoading && (
+                        <GlassCard className="p-8 border-slate-200 shadow-sm text-center">
+                            <h3 className="font-bold text-slate-800 text-lg mb-2">فحص مصدر الفيديو</h3>
+                            <p className="text-sm text-slate-500 max-w-lg mx-auto mb-6">
+                                يختار النظام تلقائياً عدة إطارات مميزة من الفيديو، يبحث عن كل منها بحثاً عكسياً في المحركات،
+                                ثم يجمع النتائج: ما هو الفيديو، من نشره أولاً، وكيف انتشر.
+                            </p>
+                            <GradientButton onClick={() => handleVideoOrigin(false)} className="px-10">
+                                <Search className="w-5 h-5 ml-2" /> ابدأ فحص الفيديو
+                            </GradientButton>
+                        </GlassCard>
+                    )}
+
+                    {originLoading && (
+                        <div className="ai-loading-state animate-fade-in">
+                            <div className="ai-loading-rings">
+                                <div className="ai-loading-ring ai-loading-ring--1" />
+                                <div className="ai-loading-ring ai-loading-ring--2" />
+                                <div className="ai-loading-ring ai-loading-ring--3" />
+                                <Search className="w-7 h-7 text-slate-800 relative z-10" />
+                            </div>
+                            <h3 className="text-lg font-bold text-slate-800 mt-6 mb-2">جاري فحص الفيديو...</h3>
+                            <p className="text-sm text-slate-500">
+                                {originJob.progress.length > 0 ? originJob.progress[originJob.progress.length - 1] : originStage}
+                            </p>
+                            {originFrames.length > 0 && (
+                                <div className="flex items-center gap-1.5 mt-4 flex-wrap justify-center">
+                                    {originFrames.map((src, i) => (
+                                        <img key={i} src={src} alt="" className="w-12 h-9 object-cover rounded-md border border-slate-200" />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {originPayload && !originLoading && (
+                        <div>
+                            <div className="flex justify-end gap-2 mb-4">
+                                <button onClick={() => handleVideoOrigin(true)}
+                                    className="px-4 py-2 rounded-xl bg-white text-slate-800 font-bold text-sm hover:bg-slate-100 transition-all border border-slate-300 flex items-center gap-2">
+                                    <RefreshCw className="w-4 h-4" /> إعادة الفحص
+                                </button>
+                            </div>
+                            <FirstSeenCard report={parseOriginPayload(originPayload)} cached={Boolean(originPayload.cached)}
+                                onRerun={() => handleVideoOrigin(true)} videoMode frames={originFrames} />
+                            <TimelineCard report={parseOriginPayload(originPayload)} timeline={originPayload.timeline || []}
+                                cached={Boolean(originPayload.cached)} onRerun={() => handleVideoOrigin(true)} />
+                        </div>
+                    )}
                 </div>
             )}
 

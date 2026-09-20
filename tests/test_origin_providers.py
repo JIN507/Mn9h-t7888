@@ -162,6 +162,22 @@ def test_deepseek_chat_json_tolerates_prose_around_json(monkeypatch):
 
 
 @responses.activate
+def test_deepseek_describe_frames_sends_several_images(monkeypatch):
+    monkeypatch.setenv('DEEPSEEK_API_KEY', 'sk-x')
+    responses.add(responses.POST, deepseek.CHAT_URL, json={'choices': [
+        {'message': {'content': '{"summary_ar": "فيديو", "scenes": [{"frames": [1, 2], "description": "a"}]}'}}]},
+        status=200)
+    out = deepseek.describe_frames([b'f1', b'f2', b'f3', b'f4', b'f5'], 'describe', max_frames=4)
+    assert out['summary_ar'] == 'فيديو'
+    import json as _json
+    body = _json.loads(responses.calls[0].request.body)
+    parts = body['messages'][0]['content']
+    assert parts[0]['type'] == 'text'
+    assert sum(1 for p in parts if p['type'] == 'image_url') == 4      # capped
+    assert deepseek.describe_frames([], 'x') is None
+
+
+@responses.activate
 def test_deepseek_http_error_is_none(monkeypatch):
     monkeypatch.setenv('DEEPSEEK_API_KEY', 'sk-x')
     responses.add(responses.POST, deepseek.CHAT_URL, status=429, body='slow')

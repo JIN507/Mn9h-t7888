@@ -63,6 +63,26 @@ VISION_PROMPT = (
     'you cannot see.'
 )
 
+VIDEO_PROMPT = (
+    'You are an OSINT analyst. These images are FRAMES of ONE video, in '
+    'time order. Describe the video for a provenance investigation. Return '
+    'strict JSON with keys: '
+    '"summary_ar" (2-3 Arabic sentences: what the video shows and what it '
+    'seems to be about, hedged where unsure), '
+    '"description" (English, 2-3 sentences), '
+    '"scenes" (list of {"frames": [indices of the given frames, 1-based], '
+    '"description": string} — group frames that belong to the same shot), '
+    '"is_compilation" (bool: does it stitch footage from different '
+    'places/times?), '
+    '"visible_text" (list of strings exactly as written, any language), '
+    '"logos_or_watermarks" (list), "event_guess" (string|null), '
+    '"place_guess" (string|null), "date_guess" (string|null), '
+    '"language_guess" (string|null), "platform_hint" (string|null), '
+    '"suggested_queries" (3-5 short web-search queries, mixing the '
+    'video\'s language and English, aimed at the ORIGINAL upload). '
+    'Never state a fact you cannot see; mark guesses as guesses.'
+)
+
 SYSTEM_PROMPT = (
     'You are an expert OSINT image-provenance investigator. Goal: find the '
     'EARLIEST page that published THIS EXACT image (the origin), and the '
@@ -565,8 +585,9 @@ def _validated_pick(inv, finish):
 
 
 _NARRATIVE_SYSTEM = (
-    'أنت محلل تحقق من الصور. اكتب ملخصاً عربياً (4-7 جمل) لنتيجة التحقيق: '
-    'ماذا تُظهر الصورة (باختصار)، أين ظهرت أولاً ومتى وبأي دليل، ثم كيف انتشرت. '
+    'أنت محلل تحقق من الصور والفيديو. اكتب ملخصاً عربياً (4-7 جمل) لنتيجة التحقيق: '
+    'ماذا تُظهر المادة (باختصار)، أين ظهرت أولاً ومتى وبأي دليل، ثم كيف انتشرت. '
+    'إن كانت المادة فيديو من عدة مشاهد فاذكر أول ظهور لكل مشهد وإن كانت لقطاته من أحداث/أزمنة مختلفة. '
     'اعتمد فقط على البيانات المعطاة. إن كان التاريخ حداً أعلى فقل "على الأقل منذ". '
     'إن لم يوجد ظهور مؤكد فقل ذلك بوضوح واذكر أقرب المؤشرات. لا تخترع شيئاً.'
 )
@@ -617,7 +638,17 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
         logger.warning('agent: cannot download query image: %s', e)
 
     image_context = None
-    if image_bytes:
+    if image_bytes and extra_frame_urls:
+        # Video: let the vision model see several frames at once so it can
+        # say what the clip is about and split it into scenes.
+        progress('الوكيل يشاهد إطارات الفيديو (DeepSeek Vision)...')
+        try:
+            more = [oe._download_bytes(u) for u in extra_frame_urls[:3]]
+            image_context = deepseek.describe_frames([image_bytes] + [b for b in more if b],
+                                                     VIDEO_PROMPT, mime=mime)
+        except Exception as e:
+            logger.warning('video vision failed: %s', e)
+    elif image_bytes:
         progress('الوكيل ينظر إلى الصورة (DeepSeek Vision)...')
         try:
             image_context = deepseek.describe_image(image_bytes, VISION_PROMPT, mime=mime)
@@ -690,6 +721,7 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
                   + [{'round': s['n'], 'tool': s['tool'], 'summary': s['summary']}
                      for s in inv.steps],
         'narrative': narrative,
+        'video_summary': ((image_context or {}).get('summary_ar') if extra_frame_urls else None),
         'agent': {
             'model': deepseek.MODEL,
             'image_context': image_context,

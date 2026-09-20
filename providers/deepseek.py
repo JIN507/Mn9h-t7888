@@ -130,6 +130,33 @@ def describe_image(image_bytes, prompt, *, mime='image/jpeg', max_tokens=700,
     return _loads_lenient(text) if json_mode else text
 
 
+def describe_frames(frames, prompt, *, mime='image/jpeg', max_tokens=900,
+                    json_mode=True, max_frames=4):
+    """Vision call over several frames of one video (up to max_frames).
+    Returns dict (json_mode) or text; None on failure / no frames."""
+    frames = [f for f in (frames or []) if f][:max_frames]
+    if not frames:
+        return None
+    content = [{'type': 'text', 'text': prompt}]
+    content += [image_part(f, mime) for f in frames]
+    payload = {
+        'model': MODEL,
+        'messages': [{'role': 'user', 'content': content}],
+        'max_tokens': max_tokens,
+        'temperature': 0.1,
+    }
+    if json_mode:
+        payload['response_format'] = {'type': 'json_object'}
+    body = _post(payload)
+    if not body:
+        return None
+    try:
+        text = body['choices'][0]['message']['content'] or ''
+    except (KeyError, IndexError, TypeError):
+        return None
+    return _loads_lenient(text) if json_mode else text
+
+
 def chat_tools(messages, tools, *, max_tokens=900, temperature=0.1,
                tool_choice='auto'):
     """One agent turn. Returns the assistant message dict

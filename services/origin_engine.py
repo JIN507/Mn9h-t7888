@@ -1089,6 +1089,7 @@ def to_search_payload(report):
         'agent': report.get('agent'),
         'earlier_hints': report.get('earlier_hints') or [],
         'scenes': report.get('scenes') or [],
+        'video_summary': report.get('video_summary'),
         'raw': {},
     }
 

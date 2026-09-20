@@ -249,13 +249,22 @@ def test_agent_grok_tool_returns_leads_or_error(world, monkeypatch):
 
 
 def test_agent_video_mode_harvests_extra_frames(world, monkeypatch):
-    """Video mode: extra frames get their own Lens exact search and the
-    model is told it is looking at frames of one clip."""
+    """Video mode: extra frames get their own Lens exact search, the vision
+    model sees several frames at once, and the model is told it is looking
+    at frames of one clip."""
     _script_model(monkeypatch, world, [
         [('finish', {'first_seen_url': None, 'reasoning': 'x', 'confidence': 'low'})],
     ])
+    seen = {}
+    monkeypatch.setattr(oe, '_download_bytes', lambda u, timeout=None: b'frame')
+    monkeypatch.setattr(oa.deepseek, 'describe_frames',
+                        lambda frames, prompt, **kw: seen.setdefault('n', len(frames)) and
+                        {'summary_ar': 'مقطع من مشهدين', 'description': 'two scenes', 'is_compilation': True})
     report = oa.investigate('https://r2.example/q.jpg',
                             extra_frame_urls=['https://r2.example/f2.jpg', 'https://r2.example/f3.jpg'])
+    assert seen['n'] == 3                                   # primary + 2 extra frames
+    assert report['video_summary'] == 'مقطع من مشهدين'
+    assert report['agent']['image_context']['video_mode'] is True
     searched = {u for (u, t, hl) in world['lens'] if t == 'exact_matches'}
     assert {'https://r2.example/f2.jpg', 'https://r2.example/f3.jpg'} <= searched
     assert report['stats']['frames'] == 3

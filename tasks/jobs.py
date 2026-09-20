@@ -155,7 +155,7 @@ def run_direct_search(query=None, image_url=None, user_id=None,
             raw = {k: origin.get(k) for k in
                    ('timeline', 'engine', 'first_seen', 'narrative',
                     'engines', 'stats', 'rounds', 'note', 'agent',
-                    'earlier_hints')}
+                    'earlier_hints', 'scenes', 'video_summary')}
             origin['search_id'] = persist_search(
                 user_id, 'direct', query=None, image_url=image_url,
                 image_hash=image_hash, image_phash=image_phash,
