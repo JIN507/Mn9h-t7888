@@ -25,6 +25,13 @@ const DropZone = ({ onFileSelect, headerText = "اسحب وأفلت الصورة
                 const url = URL.createObjectURL(initialFile);
                 setVideoPreview(url);
             }
+        } else {
+            // parent cleared the file (reset): drop the stale preview too
+            setPreview(null);
+            setVideoPreview(null);
+            setFileName(null);
+            setFileType(null);
+            if (inputRef.current) inputRef.current.value = '';
         }
     }, [initialFile]);
 

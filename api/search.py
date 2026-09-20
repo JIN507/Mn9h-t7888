@@ -21,6 +21,16 @@ logger = logging.getLogger(__name__)
 bp = Blueprint('search', __name__)
 
 
+def _is_decodable_image(path):
+    try:
+        from PIL import Image
+        with Image.open(path) as img:
+            img.verify()
+        return True
+    except Exception:
+        return False
+
+
 @bp.route('/api/upload', methods=['POST'])
 @limiter.limit(SPEND_LIMIT)
 def upload_image():
@@ -38,6 +48,13 @@ def upload_image():
             filename = secure_filename(file.filename)
             filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
+
+            # The bytes must be a decodable image: a mislabeled file (HTML,
+            # empty blob) would otherwise be hosted and burn a paid search.
+            if not _is_decodable_image(filepath):
+                os.remove(filepath)
+                return jsonify({'error': 'الملف ليس صورة صالحة (JPG/PNG/WEBP)',
+                                'success': False}), 400
 
             with open(filepath, 'rb') as f:
                 image_data = base64.b64encode(f.read()).decode('utf-8')

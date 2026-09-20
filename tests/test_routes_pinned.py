@@ -394,3 +394,12 @@ def test_export_roundtrip(client):
     assert r.status_code == 200
     assert r.get_json() == payload
     assert 'attachment' in r.headers['Content-Disposition']
+
+
+def test_upload_rejects_non_image_bytes(client):
+    """A .jpg that is really HTML must not be hosted or searched."""
+    import io as _io
+    r = client.post('/api/upload', data={'file': (_io.BytesIO(b'<!doctype html><html></html>'), 'fake.jpg')},
+                    content_type='multipart/form-data')
+    assert r.status_code == 400
+    assert r.get_json()['success'] is False

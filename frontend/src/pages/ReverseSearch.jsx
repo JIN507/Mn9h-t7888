@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, RefreshCw, Calendar, ExternalLink, Award } from 'lucide-react';
+import { Search, RefreshCw, X, Calendar, ExternalLink, Award } from 'lucide-react';
 import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
 import ErrorBanner from '../components/ErrorBanner';
@@ -357,13 +357,23 @@ const ReverseSearch = () => {
                                 </span>
                             )}
                         </button>
+                        {hasAnyResult && timelineCached && (
+                            <button
+                                onClick={() => handleSearch(true)}
+                                className="px-5 py-3 rounded-2xl bg-white text-slate-800 font-bold hover:bg-slate-100 transition-all border border-slate-300 flex items-center gap-2"
+                                title="النتيجة المعروضة محفوظة من فحص سابق — أعد الفحص الآن"
+                            >
+                                <RefreshCw className="w-5 h-5" />
+                                إعادة الفحص
+                            </button>
+                        )}
                         {hasAnyResult && (
                             <button
                                 onClick={handleReset}
                                 className="px-5 py-3 rounded-2xl bg-slate-100 text-slate-600 font-bold hover:bg-slate-200 transition-all border border-slate-200"
-                                title="إعادة التعيين"
+                                title="مسح والبدء من جديد"
                             >
-                                <RefreshCw className="w-5 h-5" />
+                                <X className="w-5 h-5" />
                             </button>
                         )}
                     </div>
@@ -410,6 +420,16 @@ const ReverseSearch = () => {
                             )}
                         </div>
                     </div>
+
+                    {timelineCached && (
+                        <div className="flex items-center justify-between gap-3 p-2.5 mb-4 bg-slate-50 border border-slate-200 rounded-xl">
+                            <span className="text-xs font-bold text-slate-600">نتيجة محفوظة من فحص سابق لنفس الصورة — ظهرت فوراً دون بحث جديد</span>
+                            <button onClick={() => handleSearch(true)}
+                                className="text-xs font-bold px-3 py-1 rounded-lg bg-slate-800 text-white hover:bg-slate-700 transition-colors whitespace-nowrap">
+                                إعادة الفحص
+                            </button>
+                        </div>
+                    )}
 
                     {originReport.firstSeen ? (
                         <div className="flex gap-4">
