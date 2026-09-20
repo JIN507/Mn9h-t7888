@@ -289,7 +289,11 @@ def harvest_engine(name, image_url):
         return [], {'ok': False, 'count': 0, 'note': str(e)[:120]}
 
 
-MAX_EXTRA_FRAMES = 3
+MAX_EXTRA_FRAMES = 3          # extra frames that get their own Lens search
+MAX_SIGNATURE_FRAMES = 11     # extra frames used for visual matching
+VIDEO_CONSENSUS_MIN = 5       # ambiguous sightings of the same scene ...
+VIDEO_CONSENSUS_SIM = 0.78    # ... at least this similar ...
+VIDEO_CONSENSUS_WINDOW_DAYS = 3  # ... within this window => probable match
 
 
 def _harvest(image_url, progress, engines_status, *, include_visual=True,
@@ -597,7 +601,7 @@ def _eligible_first(item):
         return False
     if not item['published_at'] or item['confidence'] < FIRST_SEEN_MIN_CONFIDENCE:
         return False
-    if v == 'confirmed':
+    if v in ('confirmed', 'probable'):
         return True
     # No encoder / no images extracted: trust only engine-declared exact matches
     return v in ('unverified', 'no_image') and item['match_type'] == 'exact'
@@ -635,6 +639,40 @@ def _is_temporal_outlier(item, eligible):
         return False
     companions = [x for x in strong if abs(x - d) <= OUTLIER_COMPANION_DAYS]
     return not companions
+
+
+def video_consensus(timeline):
+    """Video mode fallback. Posters of OTHER moments of the clip never
+    pass exact/variant confirmation; but when many independent, dated
+    sightings of the same scene cluster within a few days, the clip is
+    the same clip. Marks that cluster 'probable' (clearly labeled) so an
+    earliest sighting can be named. Returns the number promoted."""
+    if any(i['visual']['verdict'] == 'confirmed' for i in timeline):
+        return 0
+    pool = [i for i in timeline
+            if i['visual']['verdict'] == 'ambiguous' and i.get('published_at')
+            and (i['visual'].get('similarity') or 0) >= VIDEO_CONSENSUS_SIM
+            and not i.get('is_listing')]
+    if len(pool) < VIDEO_CONSENSUS_MIN:
+        return 0
+    pool.sort(key=lambda i: i['published_at'])
+    days = [_days(i['published_at']) for i in pool]
+    best_start, best_n = 0, 0
+    for a in range(len(pool)):
+        n = sum(1 for d in days[a:] if d - days[a] <= VIDEO_CONSENSUS_WINDOW_DAYS)
+        if n > best_n:
+            best_start, best_n = a, n
+    if best_n < VIDEO_CONSENSUS_MIN:
+        return 0
+    anchor = days[best_start]
+    promoted = 0
+    for i, d in zip(pool, days):
+        if 0 <= d - anchor <= VIDEO_CONSENSUS_WINDOW_DAYS:
+            i['visual']['verdict'] = 'probable'
+            i['visual']['match_kind'] = 'video_consensus'
+            i['probable'] = True
+            promoted += 1
+    return promoted
 
 
 def assess(timeline):
@@ -786,7 +824,7 @@ def _public_item(i):
     keep = ('url', 'domain', 'title', 'match_type', 'providers', 'thumbnail',
             'published_at', 'confidence', 'evidence', 'bound', 'is_upper_bound',
             'visual', 'captured_at', 'image_size', 'origin_round', 'is_listing',
-            'is_lower_bound', 'temporal_outlier')
+            'is_lower_bound', 'temporal_outlier', 'probable')
     item = {k: i.get(k) for k in keep}
     item['link'] = i['url']
     item['type'] = i['match_type']
@@ -804,7 +842,7 @@ def frame_signatures(primary_bytes, extra_frame_urls):
     if not extra_frame_urls:
         return primary
     sigs = [primary] if primary else []
-    for url in extra_frame_urls[:MAX_EXTRA_FRAMES]:
+    for url in extra_frame_urls[:MAX_SIGNATURE_FRAMES]:
         data = _download_bytes(url)
         sig = build_query_signature(data) if data else None
         if sig:
@@ -844,6 +882,8 @@ def investigate_origin(image_url, *, progress=None, budget=None,
     chosen = prioritize(cands, budget['max_inspect'], budget['per_domain'])
     progress(f'{len(cands)} مرشحاً فريداً — فحص {len(chosen)} صفحة...')
     timeline = inspect_many(chosen, query_sig, budget['workers'], progress)
+    if extra_frame_urls:
+        video_consensus(timeline)
     first_seen = assess(timeline)
     rounds.append({'round': 0, 'candidates': len(cands), 'inspected': len(chosen),
                    'first_seen': first_seen['published_at'] if first_seen else None})
@@ -886,6 +926,9 @@ def investigate_origin(image_url, *, progress=None, budget=None,
             break
 
     # ---- report
+    if extra_frame_urls:
+        video_consensus(timeline)
+        first_seen = assess(timeline)
     kept = [i for i in timeline if i['visual']['verdict'] != 'rejected'
             and not i.get('dropped')]
     dated = sorted([i for i in kept if i['published_at']], key=_first_seen_key)
@@ -896,6 +939,7 @@ def investigate_origin(image_url, *, progress=None, budget=None,
         'checked': len(timeline),
         'with_dates': len(dated),
         'visually_confirmed': sum(1 for i in timeline if i['visual']['verdict'] == 'confirmed'),
+        'probable': sum(1 for i in timeline if i['visual']['verdict'] == 'probable'),
         'visually_rejected': sum(1 for i in timeline if i['visual']['verdict'] == 'rejected'),
         'ambiguous': sum(1 for i in timeline if i['visual']['verdict'] == 'ambiguous'),
         'elapsed_s': round(time.monotonic() - started, 1),

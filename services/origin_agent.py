@@ -88,7 +88,11 @@ SYSTEM_PROMPT = (
     '7. Be economical: each tool call costs budget shown in results. Call '
     'finish as soon as no earlier sighting is plausible, or when budget '
     'is nearly spent. In finish, explain the evidence chain in 3-6 '
-    'sentences (English is fine).'
+    'sentences (English is fine).\n'
+    '8. VIDEO queries: pages show other moments of the clip, so visual '
+    'verdicts are often "ambiguous" or "probable" (many sightings of the '
+    'same scene within days). Treat "probable" as the clip; still prefer '
+    'the earliest dated post from the account that filmed it.'
 )
 
 TOOLS = [
@@ -206,6 +210,7 @@ class Investigation:
     def __init__(self, image_url, query_sig, progress, budget):
         self.image_url = image_url
         self.image_bytes = None
+        self.extra_frames = []
         self.query_sig = query_sig
         self.progress = progress
         self.budget = budget
@@ -226,6 +231,8 @@ class Investigation:
         return self.budget['soft_time_s'] - (time.monotonic() - self.started)
 
     def first_seen(self):
+        if self.extra_frames:
+            oe.video_consensus(self.timeline)
         return oe.assess(self.timeline)
 
     def add_candidates(self, raw, round_no):
@@ -652,6 +659,7 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
         'checked': len(inv.timeline),
         'with_dates': len(dated),
         'visually_confirmed': sum(1 for i in inv.timeline if i['visual']['verdict'] == 'confirmed'),
+        'probable': sum(1 for i in inv.timeline if i['visual']['verdict'] == 'probable'),
         'visually_rejected': sum(1 for i in inv.timeline if i['visual']['verdict'] == 'rejected'),
         'ambiguous': sum(1 for i in inv.timeline if i['visual']['verdict'] == 'ambiguous'),
         'elapsed_s': round(time.monotonic() - started, 1),

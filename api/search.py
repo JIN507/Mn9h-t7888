@@ -137,7 +137,7 @@ def direct_search_api():
         image_urls = [u for u in image_urls if isinstance(u, str) and u.startswith('http')]
         if image_urls and not image_url:
             image_url = image_urls[0]
-        extra_image_urls = [u for u in image_urls if u != image_url][:3]
+        extra_image_urls = [u for u in image_urls if u != image_url][:11]
         image_hash = data.get('image_hash') or request.form.get('image_hash')
         image_phash = data.get('image_phash') or request.form.get('image_phash')
         rerun = bool(data.get('rerun') or request.form.get('rerun'))

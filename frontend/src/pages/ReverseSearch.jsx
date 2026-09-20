@@ -69,6 +69,10 @@ const DatePill = ({ item, strong = false }) => {
     );
 };
 
+const ProbablePill = ({ item }) => (
+    item?.probable ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600" title="فيديو: عدة ظهورات لنفس المشهد خلال أيام — مطابقة محتملة وليست مؤكدة">مطابقة محتملة</span> : null
+);
+
 const PlatformPill = ({ url }) => {
     const name = platformOf(url);
     if (!name) return null;
@@ -413,6 +417,7 @@ const ReverseSearch = () => {
                                 <div className="flex items-center gap-2 flex-wrap mb-2">
                                     <DatePill item={originReport.firstSeen} strong />
                                     <PlatformPill url={originReport.firstSeen.url} />
+                                    <ProbablePill item={originReport.firstSeen} />
                                 </div>
                                 <h3 className="font-bold text-slate-800 text-sm mb-1 line-clamp-2" dir="auto">{originReport.firstSeen.title}</h3>
                                 <a href={originReport.firstSeen.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-slate-500 hover:text-slate-900 break-all line-clamp-1" dir="ltr">
@@ -563,6 +568,7 @@ const ReverseSearch = () => {
                                                     {isFirst && <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-800 text-white">الأول</span>}
                                                     <DatePill item={item} strong={isFirst} />
                                                     <PlatformPill url={item.link} />
+                                                    {isFirst && <ProbablePill item={item} />}
                                                 </div>
                                                 <p className="font-bold text-xs text-slate-800 mt-1 line-clamp-1" dir="auto">{item.title}</p>
                                                 <p className="text-[10px] text-slate-400 break-all line-clamp-1" dir="ltr">{item.link}</p>

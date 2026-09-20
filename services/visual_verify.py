@@ -15,6 +15,7 @@ never do.
 import concurrent.futures
 import json
 import logging
+import re
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -84,6 +85,22 @@ def _hash_distance(sig, pil):
 
 
 # ------------------------------------------------------- candidate images
+
+_YT_ID = re.compile(r'(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|embed/)|youtu\.be/)([A-Za-z0-9_-]{11})')
+
+
+def video_frame_urls(page_url):
+    """Free extra frames for video candidates: YouTube's storyboard
+    thumbnails (0 = poster, 1/2/3 = 25/50/75%)."""
+    m = _YT_ID.search(page_url or '')
+    if not m:
+        return []
+    vid = m.group(1)
+    return [f'https://i.ytimg.com/vi/{vid}/maxresdefault.jpg',
+            f'https://i.ytimg.com/vi/{vid}/hq1.jpg',
+            f'https://i.ytimg.com/vi/{vid}/hq2.jpg',
+            f'https://i.ytimg.com/vi/{vid}/hq3.jpg']
+
 
 def extract_candidate_images(html, base_url):
     """Meaningful image URLs from a page: og/twitter meta, JSON-LD, then
@@ -198,7 +215,11 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
     for found in extract_candidate_images(html or '', url):
         if found not in candidates:
             candidates.append(found)
-    candidates = candidates[:max_images + len(extra_image_urls or [])]
+    frames = video_frame_urls(url)
+    for f in frames:
+        if f not in candidates:
+            candidates.append(f)
+    candidates = candidates[:max_images + len(extra_image_urls or []) + len(frames)]
     if not candidates:
         out['verdict'] = 'no_image'
         return out

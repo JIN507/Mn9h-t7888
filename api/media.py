@@ -50,7 +50,7 @@ def extract_frames_api():
             import base64
             from services.keyframes import select_keyframes
             blobs = [base64.b64decode(f['data'].split(',', 1)[1]) for f in frames]
-            keyframes = select_keyframes(blobs, k=4)
+            keyframes = select_keyframes(blobs, k=8)
         except Exception as e:
             logger.warning('keyframe selection failed: %s', e)
 

@@ -467,7 +467,7 @@ const VideoAnalysis = () => {
                                     <p className="text-sm text-slate-400 hidden md:block">انقر على إطار لتقوم بتحليله فوراً</p>
                                     <button
                                         onClick={() => {
-                                            const picks = (keyframeIndices.length ? keyframeIndices : frames.map((_, i) => i).slice(0, 4))
+                                            const picks = (keyframeIndices.length ? keyframeIndices : frames.map((_, i) => i).slice(0, 8))
                                                 .map((i) => frames[i]?.data).filter(Boolean);
                                             navigate('/reverse-search', { state: { frames: picks, fileName: 'video-frame.jpg', autoSearch: true } });
                                         }}

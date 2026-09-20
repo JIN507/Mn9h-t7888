@@ -42,6 +42,35 @@ def test_verify_html_matches_any_frame_of_the_clip(monkeypatch):
     assert multi['phash_distance'] == 0
 
 
+def test_video_consensus_promotes_clustered_ambiguous_sightings():
+    from services import origin_engine as oe
+
+    def amb(url, date, sim=0.81):
+        return {'url': url, 'published_at': date, 'confidence': 0.95, 'match_type': 'exact',
+                'visual': {'verdict': 'ambiguous', 'match_kind': None, 'similarity': sim}}
+    tl = [amb(f'https://s{i}.example/p', f'2026-03-0{8 if i else 7}T10:00:00Z') for i in range(6)]
+    tl.append(amb('https://late.example/p', '2026-04-09T10:00:00Z'))          # outside window
+    tl.append(amb('https://weak.example/p', '2026-03-08T11:00:00Z', sim=0.70))  # too dissimilar
+    assert oe.assess(tl) is None
+    assert oe.video_consensus(tl) == 6
+    first = oe.assess(tl)
+    assert first['url'] == 'https://s0.example/p' and first['probable'] is True
+    assert first['visual']['verdict'] == 'probable'
+    assert tl[-2]['visual']['verdict'] == 'ambiguous' and tl[-1]['visual']['verdict'] == 'ambiguous'
+    # never promotes when a real confirmation exists, or the cluster is thin
+    confirmed = dict(amb('https://c.example/p', '2026-03-08T09:00:00Z'), visual={'verdict': 'confirmed', 'match_kind': 'exact', 'similarity': 0.99})
+    assert oe.video_consensus([confirmed] + tl[:5]) == 0
+    assert oe.video_consensus([amb(f'https://t{i}.example', '2026-03-08T10:00:00Z') for i in range(3)]) == 0
+
+
+def test_youtube_storyboard_frames_are_candidate_images():
+    from services.visual_verify import video_frame_urls
+    urls = video_frame_urls('https://www.youtube.com/watch?v=IZ0ldhWOR1A&t=3s')
+    assert urls[0].endswith('/IZ0ldhWOR1A/maxresdefault.jpg') and len(urls) == 4
+    assert video_frame_urls('https://www.youtube.com/shorts/IZ0ldhWOR1A')[1].endswith('/hq1.jpg')
+    assert video_frame_urls('https://youtu.be/IZ0ldhWOR1A') and not video_frame_urls('https://news.example/a')
+
+
 def test_select_keyframes_prefers_distinct_sharp_frames():
     frames = [_png(_img(0, flat=True)),      # black leader
               _png(_img(1)), _png(_img(1)),  # duplicate pair
@@ -51,6 +80,9 @@ def test_select_keyframes_prefers_distinct_sharp_frames():
     assert 0 not in picks and 5 not in picks           # flat frames skipped
     assert not ({1, 2} <= set(picks))                  # duplicates collapse to one
     assert len(picks) == 3 and picks == sorted(picks)
+    # a usable opening frame is always kept (posters are often frame 0)
+    picks = keyframes.select_keyframes([_png(_img(7))] + frames[1:], k=4)
+    assert 0 in picks
     assert keyframes.select_keyframes([], k=4) == []
     assert keyframes.select_keyframes([b'not an image'], k=2) == [0]
 
@@ -74,4 +106,5 @@ def test_direct_search_accepts_image_urls_for_video(client, monkeypatch):
     state = client.get(r.get_json()['status_url']).get_json()
     assert state['status'] == 'finished'
     assert seen['primary'] == 'https://i.example/f1.jpg'
-    assert seen['extra'] == ['https://i.example/f2.jpg', 'https://i.example/f3.jpg', 'https://i.example/f4.jpg']
+    assert seen['extra'] == ['https://i.example/f2.jpg', 'https://i.example/f3.jpg',
+                             'https://i.example/f4.jpg', 'https://i.example/f5.jpg']

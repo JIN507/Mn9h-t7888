@@ -29,7 +29,7 @@ def _frame_features(data):
     return imagehash.phash(pil), std, sharp
 
 
-def select_keyframes(frames, k=4):
+def select_keyframes(frames, k=8):
     """frames: list of image bytes. Returns indices of up to k distinct,
     usable frames — the first pick is the sharpest frame in the middle
     third of the clip (titles/black leaders live at the ends)."""
@@ -49,6 +49,9 @@ def select_keyframes(frames, k=4):
     middle = [f for f in feats if n // 3 <= f[0] <= 2 * n // 3] or feats
     first = max(middle, key=lambda f: f[2])
     chosen = [first]
+    opening = next((f for f in feats if f[0] == 0), None)
+    if opening is not None and opening[0] != first[0] and k > 1:
+        chosen.append(opening)
     while len(chosen) < k and len(chosen) < len(feats):
         best, best_gap = None, -1
         for f in feats:
