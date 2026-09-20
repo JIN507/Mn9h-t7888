@@ -791,8 +791,14 @@ def to_search_payload(report):
     visual/providers/origin_round). first_seen, narrative, engines, stats and
     rounds ride alongside.
     """
+    # Timeline reads as "origin, then the spread": weakly-dated / lower-bound
+    # / listing pages that sort before first_seen are shown in earlier_hints
+    # and moved to the end here so "الأول" is the first row.
+    hint_urls = {h.get('url') for h in (report.get('earlier_hints') or [])}
+    items = report.get('timeline') or []
+    items = [i for i in items if i.get('url') not in hint_urls] +             [i for i in items if i.get('url') in hint_urls]
     timeline = []
-    for i in report.get('timeline') or []:
+    for i in items:
         published = i.get('published_at')
         if published:
             date_found = published[:10]

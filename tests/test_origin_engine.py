@@ -339,6 +339,19 @@ def test_to_search_payload_keeps_legacy_fields(fake_world):
     assert payload['first_seen']['url'] == first['link']
 
 
+def test_to_search_payload_puts_earlier_hints_last():
+    fs = {'url': 'https://x.com/a/status/1', 'domain': 'x.com', 'match_type': 'exact',
+          'published_at': '2024-07-19T16:31:42Z', 'confidence': 0.99}
+    weak = {'url': 'https://old.example/topic/x', 'domain': 'old.example', 'match_type': 'exact',
+            'published_at': '2023-10-25T00:00:00Z', 'confidence': 0.8}
+    later = {'url': 'https://news.example/s', 'domain': 'news.example', 'match_type': 'exact',
+             'published_at': '2024-07-20T00:00:00Z', 'confidence': 0.95}
+    payload = oe.to_search_payload({'success': True, 'first_seen': fs,
+                                    'earlier_hints': [weak], 'timeline': [weak, fs, later]})
+    assert [i['link'] for i in payload['timeline']] == [fs['url'], later['url'], weak['url']]
+    assert payload['earlier_hints'] == [weak]
+
+
 def test_to_search_payload_marks_upper_bounds_and_undated():
     payload = oe.to_search_payload({'success': True, 'timeline': [
         {'url': 'https://a.example', 'domain': 'a.example', 'match_type': 'exact',
