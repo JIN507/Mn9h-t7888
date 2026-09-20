@@ -270,8 +270,10 @@ def fake_world(monkeypatch):
                         lambda u: (_ for _ in ()).throw(RuntimeError('yandex down')))
     monkeypatch.setattr(oe.tineye_provider, 'configured', lambda: False)
     monkeypatch.setattr(oe.wayback_provider, 'earliest_capture', wayback)
-    monkeypatch.setattr(oe, 'build_query_signature_from_url',
-                        lambda u: {'phash': 'p', 'dhash': 'd', 'embedding': [0.1]})
+    monkeypatch.setattr(oe, '_download_bytes', lambda u, timeout=None: b'\x89PNGfake')
+    monkeypatch.setattr(oe, 'build_query_signature',
+                        lambda b: {'phash': 'p', 'dhash': 'd', 'embedding': [0.1]})
+    monkeypatch.setenv('SEARCH_COPY', 'none')
     monkeypatch.setattr(oe, 'fetch_page',
                         lambda url, timeout=None: _FakePage(PAGES[url]) if url in PAGES else None)
     monkeypatch.setattr(oe, 'verify_html',
@@ -319,6 +321,35 @@ def test_investigate_origin_finds_first_seen_and_expands(fake_world):
     assert any('Lens' in m or 'lens' in m for m in progress)
 
 
+def test_search_copy_url_uses_expiring_imgbb_for_presigned_links(monkeypatch):
+    calls = []
+    import providers.imgbb as imgbb
+    monkeypatch.setattr(imgbb, 'upload_to_imgbb',
+                        lambda data, expiration=None: calls.append(expiration) or 'https://i.ibb.co/x/q.jpg')
+    monkeypatch.setenv('IMGBB_API_KEY', 'k')
+    monkeypatch.setenv('SEARCH_COPY', 'imgbb')
+    presigned = 'https://acct.r2.cloudflarestorage.com/b/uploads/a.jpg?X-Amz-Signature=abc'
+    assert oe.search_copy_url(b'img', presigned) == 'https://i.ibb.co/x/q.jpg'
+    assert calls == [oe.SEARCH_COPY_TTL_S]
+    # plain public URLs pass through untouched; opt-out honoured
+    assert oe.search_copy_url(b'img', 'https://gcaptain.com/a.jpeg') == 'https://gcaptain.com/a.jpeg'
+    monkeypatch.setenv('SEARCH_COPY', 'none')
+    assert oe.search_copy_url(b'img', presigned) == presigned
+    monkeypatch.setenv('SEARCH_COPY', 'imgbb')
+    monkeypatch.delenv('IMGBB_API_KEY')
+    assert oe.search_copy_url(b'img', presigned) == presigned
+    # public R2 bucket: same object through the public base, no upload
+    monkeypatch.setenv('R2_PUBLIC_BASE_URL', 'https://pub-123.r2.dev/')
+    assert oe.search_copy_url(b'img', presigned) == 'https://pub-123.r2.dev/uploads/a.jpg'
+
+
+def test_bing_web_engine_is_off_by_default(monkeypatch):
+    monkeypatch.delenv('BING_WEB', raising=False)
+    assert oe._browser_engine('bing_web') is None
+    tasks, unavailable = oe.engine_table('https://x/q.jpg')
+    assert 'bing_web' not in tasks and unavailable['bing'] == 'not configured'
+
+
 def test_investigate_origin_without_serpapi_key(monkeypatch):
     monkeypatch.delenv('SERPAPI_API_KEY', raising=False)
     report = oe.investigate_origin('https://r2.example/q.jpg')
@@ -346,9 +377,11 @@ def test_to_search_payload_puts_earlier_hints_last():
             'published_at': '2023-10-25T00:00:00Z', 'confidence': 0.8}
     later = {'url': 'https://news.example/s', 'domain': 'news.example', 'match_type': 'exact',
              'published_at': '2024-07-20T00:00:00Z', 'confidence': 0.95}
+    unverified = {'url': 'https://port.example/detail/x', 'domain': 'port.example', 'match_type': 'exact',
+                  'published_at': '2023-10-25T00:00:00Z', 'confidence': 0.8, 'visual': {'verdict': 'unverified'}}
     payload = oe.to_search_payload({'success': True, 'first_seen': fs,
-                                    'earlier_hints': [weak], 'timeline': [weak, fs, later]})
-    assert [i['link'] for i in payload['timeline']] == [fs['url'], later['url'], weak['url']]
+                                    'earlier_hints': [weak], 'timeline': [unverified, weak, fs, later]})
+    assert [i['link'] for i in payload['timeline']] == [fs['url'], later['url'], unverified['url'], weak['url']]
     assert payload['earlier_hints'] == [weak]
 
 

@@ -92,6 +92,7 @@ def world(monkeypatch):
     monkeypatch.setenv('SERPAPI_API_KEY', 'test')
     monkeypatch.setenv('ZENSERP_API_KEY', 'test')
     monkeypatch.setenv('DEEPSEEK_API_KEY', 'test')
+    monkeypatch.setenv('SEARCH_COPY', 'none')
 
     # text search: Zenserp organic leads
     class _Resp:
@@ -220,6 +221,31 @@ def test_agent_read_page_mines_credits_and_handles(world, monkeypatch):
     assert '@AgencyPix' in body['handles_mentioned']
     assert any('Agency' in c for c in body['credits_mentioned'])
     assert body['matched_image_url'] == 'https://agency.example/full.jpg'
+
+
+def test_agent_grok_tool_returns_leads_or_error(world, monkeypatch):
+    from providers import xai
+    monkeypatch.setattr(xai, 'configured', lambda: True)
+    monkeypatch.setattr(xai, 'search_origin', lambda u, q, **kw: {
+        'text': 'Found it', 'urls': ['https://x.com/AgencyPix/status/1367000000000000000',
+                                    'https://google.com/search?q=x'], 'error': None})
+    _script_model(monkeypatch, world, [
+        [('grok_search', {'question': 'earliest X post of this photo'})],
+        [('finish', {'first_seen_url': None, 'reasoning': 'x', 'confidence': 'low'})],
+    ])
+    report = oa.investigate('https://r2.example/q.jpg')
+    tool_msgs = [m for m in world['llm_messages'] if m.get('role') == 'tool']
+    body = json.loads(tool_msgs[0]['content'])
+    assert body['answer'] == 'Found it'
+    assert [l['url'] for l in body['leads']] == ['https://x.com/AgencyPix/status/1367000000000000000']
+    assert body['leads'][0]['social_post'] is True
+    assert report['engines']['grok'] == {'ok': True, 'count': 1}
+
+    monkeypatch.setattr(xai, 'search_origin', lambda u, q, **kw: {'text': '', 'urls': [], 'error': 'HTTP 403: xAI account has no credits'})
+    _script_model(monkeypatch, world, [[('grok_search', {'question': 'q'})]])
+    report = oa.investigate('https://r2.example/q.jpg')
+    assert report['engines']['grok']['ok'] is False
+    assert 'Grok' in report['agent']['steps'][0]['summary']
 
 
 def test_agent_falls_back_to_deterministic_engine_without_key(world, monkeypatch):

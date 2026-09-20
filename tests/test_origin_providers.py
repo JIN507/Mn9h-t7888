@@ -71,6 +71,43 @@ def test_yandex_harvests_visual_sections_only():
     assert 'engine=yandex_images' in responses.calls[0].request.url
 
 
+@responses.activate
+def test_yandex_similar_images_section():
+    responses.add(responses.GET, SERP, json={
+        'image_results': [],
+        'similar_images': [{'link': 'https://blog.example/p', 'image': 'https://i/1.jpg'},
+                           {'link': 'https://yandex.ru/images/x', 'image': 'https://i/2.jpg'}],
+    }, status=200)
+    got = yandex.reverse_image('https://img.example/a.jpg')
+    assert [(g['link'], g['match_type']) for g in got] == [('https://blog.example/p', 'similar')]
+
+
+# ------------------------------------------------------------------ Grok
+
+def test_xai_parse_search_output_collects_text_and_urls():
+    from providers import xai
+    body = {'output': [
+        {'type': 'x_search_call', 'status': 'completed', 'results': [{'url': 'https://x.com/a/status/1'}]},
+        {'type': 'message', 'content': [{'type': 'output_text',
+            'text': 'Earliest: https://x.com/IndiaCoastGuard/status/1814337329387175999 (19 Jul 2024).',
+            'annotations': [{'type': 'url_citation', 'url': 'https://gcaptain.com/major-fire/'}]}]},
+    ]}
+    out = xai.parse_search_output(body)
+    assert 'Earliest' in out['text']
+    assert out['urls'][:3] == ['https://x.com/a/status/1', 'https://gcaptain.com/major-fire/',
+                               'https://x.com/IndiaCoastGuard/status/1814337329387175999']
+
+
+@responses.activate
+def test_xai_search_origin_reports_missing_credits(monkeypatch):
+    from providers import xai
+    monkeypatch.setenv('XAI_API_KEY', 'k')
+    responses.add(responses.POST, xai.RESPONSES_URL, status=403,
+                  json={'code': 'permission-denied', 'error': 'team does not have any credits'})
+    res = xai.search_origin('https://img/q.jpg', 'find it')
+    assert res['urls'] == [] and 'no credits' in res['error']
+
+
 # --------------------------------------------------------------- Wayback
 
 @responses.activate

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, RefreshCw, Layers, Calendar, ExternalLink, ImageIcon, Award, ShieldCheck, ShieldAlert, ShieldQuestion } from 'lucide-react';
+import { Search, RefreshCw, Calendar, ExternalLink, Award } from 'lucide-react';
 import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
 import ErrorBanner from '../components/ErrorBanner';
@@ -8,22 +8,7 @@ import useJob from '../hooks/useJob';
 import GradientButton from '../components/GradientButton';
 import DropZone from '../components/DropZone';
 
-// Match-bucket labels (exact / similar / page mention)
-const MATCH_TYPE_LABELS = {
-    exact: { text: 'مطابقة تامة', cls: 'bg-emerald-100 text-emerald-700' },
-    similar: { text: 'صورة مشابهة', cls: 'bg-sky-100 text-sky-700' },
-    page_match: { text: 'ذكر في صفحة', cls: 'bg-amber-100 text-amber-700' },
-    organic: { text: 'بحث نصي', cls: 'bg-violet-100 text-violet-700' },
-};
 
-// Visual verification verdicts (Origin Engine)
-const VISUAL_LABELS = {
-    confirmed: { text: 'مؤكدة بصرياً', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', Icon: ShieldCheck },
-    ambiguous: { text: 'تشابه جزئي', cls: 'bg-amber-50 text-amber-700 border-amber-200', Icon: ShieldQuestion },
-    unverified: { text: 'غير محقَّقة', cls: 'bg-slate-50 text-slate-500 border-slate-200', Icon: ShieldQuestion },
-    no_image: { text: 'بلا صورة', cls: 'bg-slate-50 text-slate-500 border-slate-200', Icon: ShieldQuestion },
-    error: { text: 'تعذّر الفحص', cls: 'bg-slate-50 text-slate-400 border-slate-200', Icon: ShieldAlert },
-};
 
 const ENGINE_LABELS = {
     lens_exact_en: 'Lens (EN)', lens_exact_ar: 'Lens (AR)', lens_visual: 'Lens مشابه',
@@ -47,17 +32,47 @@ const EVIDENCE_LABELS = {
 const evidenceLabel = (src) => EVIDENCE_LABELS[src] || (src || '').split(':')[0];
 const pct = (v) => (typeof v === 'number' ? `${Math.round(v * 100)}%` : null);
 
-const VisualBadge = ({ visual }) => {
-    const v = VISUAL_LABELS[visual?.verdict] || null;
-    if (!v) return null;
-    const Icon = v.Icon;
+const PLATFORMS = [
+    ['x.com', 'X'], ['twitter.com', 'X'], ['facebook.com', 'Facebook'], ['instagram.com', 'Instagram'],
+    ['youtube.com', 'YouTube'], ['youtu.be', 'YouTube'], ['tiktok.com', 'TikTok'], ['t.me', 'Telegram'],
+    ['telegram.me', 'Telegram'], ['reddit.com', 'Reddit'], ['threads.net', 'Threads'], ['vk.com', 'VK'],
+    ['linkedin.com', 'LinkedIn'], ['pinterest.', 'Pinterest'], ['snapchat.com', 'Snapchat'],
+];
+const platformOf = (url) => {
+    try {
+        const h = new URL(url).hostname.replace(/^(www|m|mobile)\./, '');
+        for (const [d, n] of PLATFORMS) if (h === d || h.endsWith('.' + d) || h.startsWith(d)) return n;
+        return h;
+    } catch { return ''; }
+};
+const isSocial = (url) => PLATFORMS.some(([d]) => (url || '').includes(d));
+const thumbOf = (item) => item?.visual?.matched_image_url || item?.thumbnail || null;
+
+const Thumb = ({ item, size = 'w-14 h-14' }) => {
+    const src = thumbOf(item);
+    if (!src) return <div className={`${size} rounded-lg bg-slate-100 border border-slate-200 shrink-0`} />;
     return (
-        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border ${v.cls}`}>
-            <Icon className="w-3 h-3" />
-            {v.text}
-            {typeof visual?.similarity === 'number' && ` ${Math.round(visual.similarity * 100)}%`}
+        <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer"
+            className={`${size} rounded-lg object-cover border border-slate-200 bg-slate-50 shrink-0`}
+            onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
+    );
+};
+
+const DatePill = ({ item, strong = false }) => {
+    const d = (item?.published_at || '').slice(0, 10);
+    if (!d) return <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-500">بدون تاريخ</span>;
+    const prefix = item.is_upper_bound ? 'على الأقل منذ ' : item.is_lower_bound ? 'ليس قبل ' : '';
+    return (
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${strong ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-700'}`}>
+            {prefix}<span dir="ltr">{d}</span>
         </span>
     );
+};
+
+const PlatformPill = ({ url }) => {
+    const name = platformOf(url);
+    if (!name) return null;
+    return <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600" dir="ltr">{name}</span>;
 };
 
 const ReverseSearch = () => {
@@ -340,57 +355,38 @@ const ReverseSearch = () => {
             {/* First seen (Origin Engine) */}
             {!loading && originReport && (originReport.firstSeen || originReport.narrative) && (
                 <GlassCard className="ai-result-card p-6 border-slate-200 shadow-sm mb-6 animate-fade-in-up">
-                    <div className="absolute top-0 left-0 right-0 h-1 rounded-t-2xl bg-gradient-to-r from-emerald-600 via-emerald-400 to-emerald-600" />
+                    <div className="absolute top-0 left-0 right-0 h-1 rounded-t-2xl bg-gradient-to-r from-slate-800 via-slate-600 to-slate-800" />
                     <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-100">
-                        <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center">
-                            <Award className="w-5 h-5 text-emerald-700" />
+                        <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center">
+                            <Award className="w-5 h-5 text-slate-700" />
                         </div>
                         <div>
                             <h2 className="font-bold text-slate-800">أول ظهور مؤكد للصورة</h2>
                             {originReport.stats?.checked > 0 && (
                                 <p className="text-[11px] text-slate-400">
-                                    فُحصت {originReport.stats.checked} صفحة · مؤكدة بصرياً {originReport.stats.visually_confirmed || 0} · مؤرَّخة {originReport.stats.with_dates || 0}
+                                    فُحصت {originReport.stats.checked} صفحة · مؤكدة بصرياً {originReport.stats.visually_confirmed || 0}
                                 </p>
                             )}
                         </div>
                     </div>
 
                     {originReport.firstSeen ? (
-                        <div className="flex flex-col md:flex-row gap-4">
-                            {originReport.firstSeen.thumbnail && (
-                                <img src={originReport.firstSeen.thumbnail} alt="" className="w-full md:w-40 h-32 object-cover rounded-xl border border-slate-200" />
-                            )}
+                        <div className="flex gap-4">
+                            <Thumb item={originReport.firstSeen} size="w-28 h-28 md:w-36 md:h-28" />
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap mb-2">
-                                    <span className="text-sm font-black px-3 py-1 bg-emerald-100 text-emerald-800 rounded-lg">
-                                        {originReport.firstSeen.is_upper_bound ? 'على الأقل منذ ' : ''}<span dir="ltr">{(originReport.firstSeen.published_at || '').slice(0, 10)}</span>
-                                    </span>
-                                    {pct(originReport.firstSeen.confidence) && (
-                                        <span className="text-[11px] font-bold text-slate-500">ثقة {pct(originReport.firstSeen.confidence)}</span>
-                                    )}
-                                    <VisualBadge visual={originReport.firstSeen.visual} />
-                                    {MATCH_TYPE_LABELS[originReport.firstSeen.match_type] && (
-                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${MATCH_TYPE_LABELS[originReport.firstSeen.match_type].cls}`}>
-                                            {MATCH_TYPE_LABELS[originReport.firstSeen.match_type].text}
-                                        </span>
-                                    )}
+                                    <DatePill item={originReport.firstSeen} strong />
+                                    <PlatformPill url={originReport.firstSeen.url} />
                                 </div>
-                                <h3 className="font-bold text-slate-800 text-sm mb-1 line-clamp-2">{originReport.firstSeen.title}</h3>
-                                <a href={originReport.firstSeen.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-600 hover:text-blue-800 break-all line-clamp-1" dir="ltr">
+                                <h3 className="font-bold text-slate-800 text-sm mb-1 line-clamp-2" dir="auto">{originReport.firstSeen.title}</h3>
+                                <a href={originReport.firstSeen.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-slate-500 hover:text-slate-900 break-all line-clamp-1" dir="ltr">
                                     {originReport.firstSeen.url}
                                 </a>
                                 {originReport.firstSeen.evidence?.length > 0 && (
-                                    <div className="flex items-center gap-1.5 flex-wrap mt-2">
-                                        <span className="text-[10px] text-slate-400">الأدلة:</span>
-                                        {originReport.firstSeen.evidence.slice(0, 4).map((e, i) => (
-                                            <span key={i} className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md" title={`${e.source} · ${e.date}`}>
-                                                {evidenceLabel(e.source)} {pct(e.confidence)}
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-                                {originReport.firstSeen.captured_at && (
-                                    <p className="text-[10px] text-slate-400 mt-1">تاريخ التقاط الصورة (EXIF): <span dir="ltr">{originReport.firstSeen.captured_at.slice(0, 10)}</span></p>
+                                    <p className="text-[10px] text-slate-400 mt-2">
+                                        الدليل: {originReport.firstSeen.evidence.slice(0, 3).map(e => evidenceLabel(e.source)).join(' · ')}
+                                        {originReport.firstSeen.captured_at && <> · التقاط (EXIF) <span dir="ltr">{originReport.firstSeen.captured_at.slice(0, 10)}</span></>}
+                                    </p>
                                 )}
                             </div>
                         </div>
@@ -398,42 +394,41 @@ const ReverseSearch = () => {
                         <p className="text-sm text-slate-500">لم يُعثر على ظهور مؤرَّخ ومؤكد بصرياً — راجع الجدول الزمني أدناه.</p>
                     )}
 
+                    {originReport.narrative && (
+                        <p className="text-sm text-slate-700 leading-relaxed mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100">{originReport.narrative}</p>
+                    )}
+
                     {originReport.earlierHints?.length > 0 && (
-                        <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-xl">
-                            <p className="text-[11px] font-bold text-amber-800 mb-1">مؤشرات أقدم لكن تأريخها ضعيف (تحتاج تحققاً يدوياً):</p>
-                            <ul className="space-y-0.5">
+                        <div className="mt-3 p-3 bg-white border border-slate-200 rounded-xl">
+                            <p className="text-[11px] font-bold text-slate-600 mb-1.5">مؤشرات أقدم غير مؤكدة التاريخ (تحتاج تحققاً يدوياً)</p>
+                            <ul className="space-y-1.5">
                                 {originReport.earlierHints.map((h, i) => (
-                                    <li key={i} className="text-[11px] text-amber-900 flex items-center gap-2 flex-wrap">
-                                        <span className="font-bold" dir="ltr">{h.is_lower_bound ? 'ليس قبل ' : ''}{(h.published_at || '').slice(0, 10)}</span>
-                                        <a href={h.url} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline break-all line-clamp-1" dir="ltr">{h.domain}{h.is_listing ? ' (صفحة فهرس)' : ''}</a>
-                                        <span className="text-amber-700">{(h.evidence || []).slice(0, 2).map(e => evidenceLabel(e.source)).join(' · ')}</span>
+                                    <li key={i} className="flex items-center gap-2 text-[11px] text-slate-600">
+                                        <Thumb item={h} size="w-8 h-8" />
+                                        <DatePill item={h} />
+                                        <PlatformPill url={h.url} />
+                                        <a href={h.url} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:text-slate-900 break-all line-clamp-1" dir="ltr">{h.url}</a>
                                     </li>
                                 ))}
                             </ul>
                         </div>
                     )}
 
-                    {originReport.narrative && (
-                        <p className="text-sm text-slate-700 leading-relaxed mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100">{originReport.narrative}</p>
-                    )}
-
                     {Object.keys(originReport.engines || {}).length > 0 && (
-                        <div className="flex items-center gap-1.5 flex-wrap mt-4">
-                            {Object.entries(originReport.engines).map(([name, st]) => (
-                                <span key={name} title={st.note || st.caption || ''}
-                                    className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${st.ok ? 'bg-white text-slate-600 border-slate-200' : 'bg-slate-50 text-slate-400 border-slate-100 line-through'}`}>
-                                    {ENGINE_LABELS[name.replace('@pivot', '')] || name}{name.includes('@pivot') ? ' ↺' : ''}{st.ok ? ` ${st.count}` : ''}
-                                </span>
-                            ))}
-                        </div>
+                        <p className="text-[10px] text-slate-400 mt-4" dir="ltr">
+                            {Object.entries(originReport.engines)
+                                .filter(([, st]) => st.ok && st.count > 0)
+                                .map(([name, st]) => `${ENGINE_LABELS[name.replace('@pivot', '')] || name} ${st.count}`)
+                                .join(' · ')}
+                        </p>
                     )}
 
                     {originReport.agent && (
-                        <details className="mt-4 group">
+                        <details className="mt-3 group">
                             <summary className="cursor-pointer text-xs font-bold text-slate-600 select-none">
-                                خطوات التحقيق ({(originReport.agent.steps || []).length}) · {originReport.agent.model}
+                                خطوات التحقيق ({(originReport.agent.steps || []).length})
                                 {originReport.agent.pick && (
-                                    <span className={`mr-2 text-[10px] px-2 py-0.5 rounded-md ${originReport.agent.pick_matches_first_seen ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                    <span className="mr-2 text-[10px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
                                         {originReport.agent.pick_matches_first_seen ? 'استنتاج الوكيل يطابق الأدلة' : 'استنتاج الوكيل يختلف عن الأدلة'}
                                     </span>
                                 )}
@@ -442,7 +437,6 @@ const ReverseSearch = () => {
                                 <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
                                     <span className="font-bold text-slate-600">ما تراه الرؤية الآلية: </span>
                                     {originReport.agent.image_context.description}
-                                    {originReport.agent.image_context.event_guess && ` · حدث محتمل: ${originReport.agent.image_context.event_guess}`}
                                 </p>
                             )}
                             <ol className="mt-2 space-y-1">
@@ -511,17 +505,17 @@ const ReverseSearch = () => {
                             <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center">
                                 <Calendar className="w-5 h-5 text-slate-700" />
                             </div>
-                            <h2 className="font-bold text-slate-800">{originReport ? 'الجدول الزمني — من نشرها وأعاد نشرها' : 'الجدول الزمني'}</h2>
+                            <h2 className="font-bold text-slate-800">{originReport ? 'من نشرها ومن أعاد نشرها' : 'الجدول الزمني'}</h2>
                         </div>
 
                         <ErrorBanner message={errors.timeline} className="mb-4" />
 
                         {timelineCached && (
-                            <div className="flex items-center justify-between p-2.5 mb-4 bg-sky-50 border border-sky-100 rounded-xl">
-                                <span className="text-xs font-bold text-sky-700">نتيجة محفوظة من فحص سابق لنفس الصورة</span>
+                            <div className="flex items-center justify-between p-2.5 mb-4 bg-slate-50 border border-slate-200 rounded-xl">
+                                <span className="text-xs font-bold text-slate-600">نتيجة محفوظة من فحص سابق لنفس الصورة</span>
                                 <button
                                     onClick={() => handleSearch(true)}
-                                    className="text-xs font-bold px-3 py-1 rounded-lg bg-white border border-sky-200 text-sky-700 hover:bg-sky-100 transition-colors"
+                                    className="text-xs font-bold px-3 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition-colors"
                                 >
                                     إعادة الفحص
                                 </button>
@@ -529,47 +523,31 @@ const ReverseSearch = () => {
                         )}
 
                         {timelineEngine === 'google_lens_fallback' && (
-                            <div className="p-2.5 mb-4 bg-amber-50 border border-amber-100 rounded-xl">
-                                <span className="text-xs font-bold text-amber-700">
+                            <div className="p-2.5 mb-4 bg-slate-50 border border-slate-200 rounded-xl">
+                                <span className="text-xs font-bold text-slate-600">
                                     تعذّر الوصول لمحرك الجدول الزمني — النتائج من Google Lens مباشرة
                                 </span>
                             </div>
                         )}
 
                         {timelineResult ? (
-                            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1" dir="ltr">
+                            <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
                                 {timelineResult.map((item, idx) => {
                                     const isFirst = originReport?.firstSeen && item.link === originReport.firstSeen.url;
                                     return (
-                                        <div key={idx} className={`bg-white p-3 rounded-xl border text-left ${isFirst ? 'border-emerald-300 ring-1 ring-emerald-100' : 'border-slate-200'}`}>
-                                            <div className="flex items-center gap-1.5 flex-wrap">
-                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${item.published_at ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500'}`}>{item.date_found}</span>
-                                                {isFirst && <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-700">الأول</span>}
-                                                {MATCH_TYPE_LABELS[item.type] && (
-                                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${MATCH_TYPE_LABELS[item.type].cls}`}>
-                                                        {MATCH_TYPE_LABELS[item.type].text}
-                                                    </span>
-                                                )}
-                                                {item.visual && <VisualBadge visual={item.visual} />}
-                                                {pct(item.confidence) && item.published_at && (
-                                                    <span className="text-[10px] text-slate-400">ثقة {pct(item.confidence)}</span>
-                                                )}
-                                            </div>
-                                            <h4 className="font-bold text-xs text-slate-800 mt-2 mb-1 line-clamp-2" dir="rtl">{item.title}</h4>
-                                            <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-600 hover:text-blue-800 break-all line-clamp-1">{item.link}</a>
-                                            {(item.evidence?.length > 0 || item.providers?.length > 0) && (
-                                                <div className="flex items-center gap-1 flex-wrap mt-1.5" dir="rtl">
-                                                    {(item.evidence || []).slice(0, 3).map((e, i) => (
-                                                        <span key={i} className="text-[9px] px-1.5 py-0.5 bg-slate-50 text-slate-500 rounded border border-slate-100" title={`${e.source} · ${e.date}`}>
-                                                            {evidenceLabel(e.source)}
-                                                        </span>
-                                                    ))}
-                                                    {item.providers?.length > 0 && (
-                                                        <span className="text-[9px] text-slate-400" dir="ltr">{item.providers.join(' · ')}</span>
-                                                    )}
+                                        <a key={idx} href={item.link} target="_blank" rel="noopener noreferrer"
+                                            className={`flex items-center gap-3 p-2.5 rounded-xl border bg-white hover:border-slate-300 hover:shadow-sm transition-all ${isFirst ? 'border-slate-800' : 'border-slate-200'}`}>
+                                            <Thumb item={item} />
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                    {isFirst && <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-800 text-white">الأول</span>}
+                                                    <DatePill item={item} strong={isFirst} />
+                                                    <PlatformPill url={item.link} />
                                                 </div>
-                                            )}
-                                        </div>
+                                                <p className="font-bold text-xs text-slate-800 mt-1 line-clamp-1" dir="auto">{item.title}</p>
+                                                <p className="text-[10px] text-slate-400 break-all line-clamp-1" dir="ltr">{item.link}</p>
+                                            </div>
+                                        </a>
                                     );
                                 })}
                             </div>

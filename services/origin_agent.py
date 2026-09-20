@@ -133,6 +133,18 @@ TOOLS = [
         'parameters': {'type': 'object', 'properties': {
             'url': {'type': 'string'}}, 'required': ['url']}}},
     {'type': 'function', 'function': {
+        'name': 'grok_search',
+        'description': 'Ask Grok (xAI) to search X/Twitter and the web for '
+                       'the original post of this image. Returns its answer '
+                       'and the URLs it cites as LEADS (not evidence — '
+                       'inspect them). Use when the origin is likely a '
+                       'social post. Unavailable if the account has no credits.',
+        'parameters': {'type': 'object', 'properties': {
+            'question': {'type': 'string',
+                         'description': 'What to find, in English, e.g. '
+                                        '"earliest X post of this photo of ..."'}},
+            'required': ['question']}}},
+    {'type': 'function', 'function': {
         'name': 'finish',
         'description': 'End the investigation with your conclusion.',
         'parameters': {'type': 'object', 'properties': {
@@ -384,6 +396,30 @@ def tool_web_search(inv, query, lang='auto'):
             'note': 'Leads are not evidence. inspect_pages the promising ones.'}
 
 
+def tool_grok_search(inv, question):
+    from providers import xai
+    if not xai.configured():
+        return {'error': 'grok search not configured'}
+    inv.progress('الوكيل: يسأل Grok (بحث X والويب)...')
+    q = ((question or 'Find the earliest publication of this exact image.')
+         + ' Search X (Twitter) and the web. List every URL you find with '
+           'its date. Only include URLs you actually retrieved.')
+    res = xai.search_origin(inv.image_url, q)
+    if res.get('error'):
+        inv.engines_status['grok'] = {'ok': False, 'count': 0, 'note': res['error'][:120]}
+        return {'error': res['error']}
+    leads = []
+    for u in res['urls']:
+        if oe.is_junk(u):
+            continue
+        canon = oe.canonical_url(u)
+        leads.append({'url': u, 'social_post': oe.is_social(u),
+                      'already_inspected': bool(canon and canon in inv.by_canonical)})
+    inv.engines_status['grok'] = {'ok': True, 'count': len(leads)}
+    return {'answer': res['text'][:2500], 'leads': leads,
+            'note': 'Leads are not evidence. inspect_pages the promising ones.'}
+
+
 def tool_read_page(inv, url):
     if not isinstance(url, str) or not url.startswith('http'):
         return {'error': 'bad url'}
@@ -425,6 +461,10 @@ def _summ(tool, args, result):
         return f"«{args.get('query', '')[:50]}» → {len(result.get('leads', []))} نتيجة"
     if tool == 'read_page':
         return f"{oe.domain_of(args.get('url', ''))}: {result.get('visual')} / {result.get('date')}"
+    if tool == 'grok_search':
+        if result.get('error'):
+            return f"Grok: {result['error'][:60]}"
+        return f"Grok → {len(result.get('leads', []))} رابطاً"
     if tool == 'finish':
         return f"خلاصة ({args.get('confidence')})"
     return ''
@@ -481,6 +521,8 @@ def run_agent(inv, image_context):
                                              args.get('lang', 'auto'))
                 elif name == 'read_page':
                     result = tool_read_page(inv, args.get('url', ''))
+                elif name == 'grok_search':
+                    result = tool_grok_search(inv, args.get('question', ''))
                 elif name == 'finish':
                     finish = args
                     result = {'ok': True}
@@ -565,12 +607,14 @@ def investigate(image_url, *, progress=None, budget=None):
         except Exception as e:
             logger.warning('vision failed: %s', e)
 
-    inv = Investigation(image_url, query_sig, progress, budget)
+    search_url = oe.search_copy_url(image_bytes, image_url)
+    inv = Investigation(search_url, query_sig, progress, budget)
+    inv.original_url = image_url
     inv.llm_calls += 1 if image_context is not None else 0
 
     # round 0: the deterministic harvest gives the model evidence to reason from
-    progress('جاري البحث في المحركات (Lens, Yandex, TinEye, Bing)...')
-    raw = oe._harvest(image_url, progress, inv.engines_status)
+    progress('جاري البحث في المحركات (Lens, Yandex, TinEye)...')
+    raw = oe._harvest(search_url, progress, inv.engines_status)
     cands = inv.add_candidates(raw, round_no=0)
     chosen = oe.prioritize(cands, budget['round0_inspect'], budget['per_domain'])
     progress(f'{len(cands)} مرشحاً فريداً — فحص {len(chosen)} صفحة...')

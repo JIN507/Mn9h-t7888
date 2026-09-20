@@ -27,18 +27,22 @@ class ImgBBProvider(BaseProvider):
 _provider = ImgBBProvider()
 
 
-def upload_to_imgbb(image_data):
-    """Upload an image (bytes, file-like, or base64 str) — returns URL or None."""
+def upload_to_imgbb(image_data, expiration=None):
+    """Upload an image (bytes, file-like, or base64 str) — returns URL or None.
+    `expiration` (seconds, 60..15552000) makes ImgBB delete it afterwards."""
     api_key = os.environ.get('IMGBB_API_KEY')
     if not api_key:
         logger.error('IMGBB_API_KEY not configured; upload skipped')
         return None
+    form = {'key': api_key}
+    if expiration:
+        form['expiration'] = int(expiration)
 
     try:
         if isinstance(image_data, bytes) or hasattr(image_data, 'read'):
             response = _provider.request(
                 'POST', UPLOAD_URL,
-                data={'key': api_key}, files={'image': image_data})
+                data=form, files={'image': image_data})
 
         elif isinstance(image_data, str):
             # Clean data URL prefix if present
@@ -55,7 +59,7 @@ def upload_to_imgbb(image_data):
                     with open(temp_path, 'rb') as img_file:
                         response = _provider.request(
                             'POST', UPLOAD_URL,
-                            data={'key': api_key}, files={'image': img_file})
+                            data=form, files={'image': img_file})
                 finally:
                     try:
                         os.remove(temp_path)
@@ -66,7 +70,7 @@ def upload_to_imgbb(image_data):
                                'raw string upload', e)
                 response = _provider.request(
                     'POST', UPLOAD_URL,
-                    data={'key': api_key}, files={'image': image_data})
+                    data=form, files={'image': image_data})
         else:
             logger.error('Unsupported image data type: %s', type(image_data))
             return None

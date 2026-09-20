@@ -36,7 +36,8 @@ from providers.serpapi import lens_matches
 from providers import vision as vision_provider
 from providers.vision import vision_web_detection
 from services import date_evidence as de
-from services.visual_verify import (build_query_signature_from_url,
+from services.visual_verify import (build_query_signature,
+                                    build_query_signature_from_url,
                                     fetch_page, verify_html)
 
 logger = logging.getLogger(__name__)
@@ -164,7 +165,11 @@ def _lens_exact_with_retry(image_url, hl, country):
 
 
 def _browser_engine(name):
-    """Playwright-driven engines (TinEye / Bing websites) — optional dep."""
+    """Playwright-driven engines (TinEye / Bing websites) — optional dep.
+    Bing is off unless BING_WEB=true: its URL-paste flow stopped returning
+    results to headless browsers (Sept 2026) and cost ~10 s per run."""
+    if name == 'bing_web' and os.environ.get('BING_WEB', 'false').lower() != 'true':
+        return None
     try:
         from providers import browser_search
     except Exception:  # playwright not installed
@@ -172,6 +177,56 @@ def _browser_engine(name):
     if not browser_search.configured():
         return None
     return getattr(browser_search, name, None)
+
+
+SEARCH_COPY_TTL_S = 3600
+
+
+def _download_bytes(image_url, timeout=(5, 20)):
+    try:
+        r = requests.get(image_url, timeout=timeout)
+        r.raise_for_status()
+        return r.content
+    except Exception as e:
+        logger.warning('cannot download query image: %s', e)
+        return None
+
+
+def search_copy_url(image_bytes, image_url):
+    """A clean, public, extension-bearing URL of the query image for the
+    engines. Presigned R2 links (long query strings) are rejected by Yandex
+    ('not publicly accessible') and are flaky with Lens; an expiring ImgBB
+    copy is accepted everywhere. The image is being sent to those engines
+    anyway, so the copy adds no exposure. Falls back to image_url."""
+    if not image_bytes or os.environ.get('SEARCH_COPY', 'imgbb').lower() == 'none':
+        return image_url
+    try:
+        parsed = urlparse(image_url)
+        if not parsed.query:
+            return image_url          # already a plain public URL
+    except Exception:
+        return image_url
+    # Option A: the R2 bucket has public access (r2.dev or custom domain):
+    # same object, plain URL, no upload needed.
+    public_base = os.environ.get('R2_PUBLIC_BASE_URL', '').rstrip('/')
+    if public_base and 'r2.cloudflarestorage.com' in parsed.netloc:
+        key = parsed.path.lstrip('/').split('/', 1)[-1]   # drop the bucket segment
+        if key:
+            return f'{public_base}/{key}'
+    # Option B: an expiring ImgBB copy.
+    if not os.environ.get('IMGBB_API_KEY'):
+        logger.warning('search copy: no R2_PUBLIC_BASE_URL and no IMGBB_API_KEY — '
+                       'engines get the presigned link (Yandex will reject it)')
+        return image_url
+    try:
+        from providers.imgbb import upload_to_imgbb
+        url = upload_to_imgbb(image_bytes, expiration=SEARCH_COPY_TTL_S)
+        if url and url.startswith('http'):
+            logger.info('search copy hosted for engines (expires in %ss)', SEARCH_COPY_TTL_S)
+            return url
+    except Exception as e:
+        logger.warning('search copy upload failed: %s', e)
+    return image_url
 
 
 def engine_table(image_url, *, include_visual=True):
@@ -693,11 +748,13 @@ def investigate_origin(image_url, *, progress=None, budget=None):
         return _empty('SerpAPI key not configured')
 
     progress('جاري تجهيز بصمة الصورة...')
-    query_sig = build_query_signature_from_url(image_url)
+    image_bytes = _download_bytes(image_url)
+    query_sig = build_query_signature(image_bytes) if image_bytes else None
+    search_url = search_copy_url(image_bytes, image_url)
 
     # ---- round 0: harvest + inspect
     progress('جاري البحث في المحركات (Lens, Vision, TinEye, Yandex)...')
-    raw = _harvest(image_url, progress, engines_status)
+    raw = _harvest(search_url, progress, engines_status)
     seen = set()
     cands = merge_candidates(raw, seen)
     seen.update(c['canonical'] for c in cands)
@@ -714,7 +771,7 @@ def investigate_origin(image_url, *, progress=None, budget=None):
             break
         new_cands = []
         if r == 1:
-            new_cands += _lens_pivot(first_seen, timeline, image_url, seen,
+            new_cands += _lens_pivot(first_seen, timeline, search_url, seen,
                                      progress, engines_status)
         pivot_cands, llm_calls, plan = _llm_text_pivot(
             timeline, first_seen, seen, progress, engines_status, budget, llm_calls)
@@ -795,8 +852,15 @@ def to_search_payload(report):
     # / listing pages that sort before first_seen are shown in earlier_hints
     # and moved to the end here so "الأول" is the first row.
     hint_urls = {h.get('url') for h in (report.get('earlier_hints') or [])}
+    fs = report.get('first_seen') or {}
+    cutoff = (fs.get('published_at') or '')[:10]
+
+    def _before_origin(i):
+        return (i.get('url') in hint_urls or
+                (cutoff and (i.get('published_at') or '')[:10] < cutoff
+                 and i.get('url') != fs.get('url')))
     items = report.get('timeline') or []
-    items = [i for i in items if i.get('url') not in hint_urls] +             [i for i in items if i.get('url') in hint_urls]
+    items = [i for i in items if not _before_origin(i)] +             [i for i in items if _before_origin(i)]
     timeline = []
     for i in items:
         published = i.get('published_at')

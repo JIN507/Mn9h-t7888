@@ -6,6 +6,7 @@ Only visual-match sections are harvested — never text/organic results.
 """
 import logging
 import os
+from urllib.parse import urlparse
 
 import requests
 
@@ -67,6 +68,17 @@ def reverse_image(image_url):
             link=link, title=item.get('title', '') or '',
             thumbnail=thumb, match_type='similar',
             provider='yandex').to_dict())
+
+    for item in data.get('similar_images') or []:
+        if not isinstance(item, dict):
+            continue
+        link = _first_url(item.get('link'), item.get('source'))
+        if not link or 'yandex.' in urlparse(link).netloc:
+            continue
+        out.append(Candidate(
+            link=link, title=item.get('title', '') or '',
+            thumbnail=_first_url(item.get('image'), item.get('thumbnail')),
+            match_type='similar', provider='yandex').to_dict())
 
     for key in ('sites', 'pages_with_matching_images'):
         for item in data.get(key) or []:

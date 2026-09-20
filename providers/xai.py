@@ -3,6 +3,7 @@
 WARNING: the investigate call can take up to 180 s and currently blocks a
 gunicorn worker. Scheduled to move into a queued job (plan Phase 2).
 """
+import json
 import logging
 import os
 
@@ -45,6 +46,71 @@ def investigate_image(image_url):
     logger.info('xAI investigation started for %s', image_url)
     return _provider.request('POST', RESPONSES_URL, json=payload,
                              headers=headers, timeout=180)
+
+
+def configured():
+    return bool(os.environ.get('XAI_API_KEY')) and \
+        os.environ.get('GROK_SEARCH', 'true').lower() != 'false'
+
+
+def search_origin(image_url, question, model=None, timeout=120):
+    """Grok with X search + web search + the image: returns
+    {'text': str, 'urls': [..], 'error': str|None}. Never raises.
+    (Grok's X search is the one tool that can surface the ORIGINAL post on
+    X directly; its answer is a lead list — every URL must be inspected.)"""
+    payload = {
+        'model': model or os.environ.get('GROK_MODEL', 'grok-4-fast'),
+        'input': [{'role': 'user', 'content': [
+            {'type': 'input_text', 'text': question},
+            {'type': 'input_image', 'image_url': image_url}]}],
+        'tools': [{'type': 'web_search'}, {'type': 'x_search'}],
+    }
+    headers = {'Content-Type': 'application/json',
+               'Authorization': f"Bearer {os.environ.get('XAI_API_KEY', '')}"}
+    try:
+        resp = _provider.request('POST', RESPONSES_URL, json=payload,
+                                 headers=headers, timeout=timeout)
+    except Exception as e:
+        return {'text': '', 'urls': [], 'error': f'request failed: {e}'}
+    if resp.status_code != 200:
+        note = resp.text[:200]
+        if resp.status_code == 403 and 'credit' in note.lower():
+            note = 'xAI account has no credits'
+        return {'text': '', 'urls': [], 'error': f'HTTP {resp.status_code}: {note}'}
+    try:
+        data = resp.json()
+    except ValueError:
+        return {'text': '', 'urls': [], 'error': 'non-JSON body'}
+    return dict(parse_search_output(data), error=None)
+
+
+def parse_search_output(data):
+    """Text + cited/mentioned URLs from a Responses-API body."""
+    import re
+    texts, urls = [], []
+    for item in data.get('output') or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get('type') == 'message':
+            for c in item.get('content') or []:
+                if not isinstance(c, dict):
+                    continue
+                if c.get('type') in ('output_text', 'text'):
+                    texts.append(c.get('text') or '')
+                for a in c.get('annotations') or []:
+                    if isinstance(a, dict) and a.get('url'):
+                        urls.append(a['url'])
+        else:  # tool call / result items: harvest any URLs they carry
+            urls.extend(re.findall(r'https?://[^\s"\'<>\\]+', json.dumps(item)))
+    text = '\n'.join(t for t in texts if t)
+    urls.extend(re.findall(r'https?://[^\s"\'<>)\]]+', text))
+    seen, ordered = set(), []
+    for u in urls:
+        u = u.rstrip('.,;')
+        if u not in seen and 'x.ai' not in u:
+            seen.add(u)
+            ordered.append(u)
+    return {'text': text, 'urls': ordered[:20]}
 
 
 def extract_summary(xai_data):
