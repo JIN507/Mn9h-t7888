@@ -33,6 +33,42 @@ def test_platform_date_twitter_snowflake_is_exact():
     assert de.platform_date('https://example.com/status/1700000000000000000') == []
 
 
+def test_platform_date_instagram_and_tiktok_ids():
+    ig = de.platform_date('https://www.instagram.com/p/C9fXkFqNn6Q/')
+    assert ig[0]['source'] == 'platform:instagram_shortcode'
+    assert ig[0]['date'].startswith('2024-07-16T16:22')
+    reel = de.platform_date('https://www.instagram.com/reel/CflCdnFt87y/?igsh=x')
+    assert reel[0]['date'].startswith('2022-07-04')
+    tt = de.platform_date('https://www.tiktok.com/@user/video/7393000000000000000')
+    assert tt[0]['source'] == 'platform:tiktok_id'
+    assert tt[0]['date'].startswith('2024-07-18T15:35')
+    assert de.platform_date('https://www.instagram.com/someuser/') == []
+
+
+def test_platform_fetch_date_telegram_and_facebook():
+    import responses as rsps
+    with rsps.RequestsMock() as r:
+        r.add(r.GET, 'https://t.me/durov/1?embed=1',
+              body='<div><time datetime="2015-10-28T18:20:58+00:00">x</time></div>', status=200)
+        ev, html = de.platform_fetch_date('https://t.me/durov/1')
+        assert ev[0]['source'] == 'platform:telegram_time'
+        assert ev[0]['date'] == '2015-10-28T18:20:58Z' and html
+        sent = r.calls[0].request
+        assert 'Googlebot' in sent.headers['User-Agent']
+
+        r.add(r.GET, 'https://www.facebook.com/groups/1/posts/2/',
+              body='<html><meta property="og:image" content="https://look/x.jpg">'
+                   '<script>{"creation_time":1721594768}</script></html>', status=200)
+        ev, html = de.platform_fetch_date('https://www.facebook.com/groups/1/posts/2/')
+        assert ev[0]['source'] == 'platform:facebook_creation_time'
+        assert ev[0]['date'] == '2024-07-21T20:46:08Z'
+        assert 'og:image' in html
+
+        r.add(r.GET, 'https://www.facebook.com/x/posts/3', status=400, body='')
+        assert de.platform_fetch_date('https://www.facebook.com/x/posts/3') == ([], None)
+    assert de.platform_fetch_date('https://news.example/a') == ([], None)
+
+
 def test_url_path_date():
     ev = de.url_path_date('https://news.example/2023/05/14/story-title')
     assert ev[0]['date'] == '2023-05-14T00:00:00Z'

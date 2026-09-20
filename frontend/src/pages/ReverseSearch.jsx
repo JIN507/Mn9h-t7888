@@ -398,22 +398,6 @@ const ReverseSearch = () => {
                         <p className="text-sm text-slate-700 leading-relaxed mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100">{originReport.narrative}</p>
                     )}
 
-                    {originReport.earlierHints?.length > 0 && (
-                        <div className="mt-3 p-3 bg-white border border-slate-200 rounded-xl">
-                            <p className="text-[11px] font-bold text-slate-600 mb-1.5">مؤشرات أقدم غير مؤكدة التاريخ (تحتاج تحققاً يدوياً)</p>
-                            <ul className="space-y-1.5">
-                                {originReport.earlierHints.map((h, i) => (
-                                    <li key={i} className="flex items-center gap-2 text-[11px] text-slate-600">
-                                        <Thumb item={h} size="w-8 h-8" />
-                                        <DatePill item={h} />
-                                        <PlatformPill url={h.url} />
-                                        <a href={h.url} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:text-slate-900 break-all line-clamp-1" dir="ltr">{h.url}</a>
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
-                    )}
-
                     {Object.keys(originReport.engines || {}).length > 0 && (
                         <p className="text-[10px] text-slate-400 mt-4" dir="ltr">
                             {Object.entries(originReport.engines)

@@ -36,7 +36,12 @@ except Exception:  # pragma: no cover - optional dependency
     HTMLDATE_AVAILABLE = False
 
 TWITTER_EPOCH_MS = 1288834974657
+INSTAGRAM_EPOCH_MS = 1314220021721
+_IG_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
 _MIN_YEAR = 1995
+CRAWLER_UA = {'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; '
+                            '+http://www.google.com/bot.html)',
+              'Accept-Language': 'en-US,en;q=0.9'}
 
 
 def _now():
@@ -98,22 +103,73 @@ def parse_date(value):
 
 # ------------------------------------------------------------ extractors
 
+def _ts_evidence(dt, confidence, source):
+    dt = dt.replace(tzinfo=None)
+    if _plausible(dt) and dt.year >= 2005:
+        return [{'date': to_iso(dt), 'confidence': confidence, 'source': source}]
+    return []
+
+
 def platform_date(url):
-    """Exact timestamps encoded in platform IDs (no fetch needed)."""
-    out = []
+    """Exact timestamps encoded in platform IDs (no fetch needed):
+    X/Twitter snowflakes, Instagram shortcodes, TikTok video IDs."""
     host = urlparse(url).netloc.lower()
-    m = re.search(r'/status(?:es)?/(\d{15,20})', url)
-    if m and any(h in host for h in ('twitter.com', 'x.com', 'nitter')):
-        try:
+    path = urlparse(url).path
+    try:
+        m = re.search(r'/status(?:es)?/(\d{15,20})', path)
+        if m and any(h in host for h in ('twitter.com', 'x.com', 'nitter')):
             ms = (int(m.group(1)) >> 22) + TWITTER_EPOCH_MS
-            dt = datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
-            dt = dt.replace(tzinfo=None)
-            if _plausible(dt):
-                out.append({'date': to_iso(dt), 'confidence': 0.98,
-                            'source': 'platform:twitter_snowflake'})
-        except (ValueError, OverflowError, OSError):
-            pass
-    return out
+            return _ts_evidence(datetime.fromtimestamp(ms / 1000, tz=timezone.utc),
+                                0.98, 'platform:twitter_snowflake')
+        m = re.search(r'/(?:p|reel|reels|tv)/([A-Za-z0-9_-]{9,12})(?:/|$)', path)
+        if m and 'instagram.com' in host:
+            n = 0
+            for ch in m.group(1)[:11]:
+                n = n * 64 + _IG_ALPHABET.index(ch)
+            ms = (n >> 23) + INSTAGRAM_EPOCH_MS
+            return _ts_evidence(datetime.fromtimestamp(ms / 1000, tz=timezone.utc),
+                                0.95, 'platform:instagram_shortcode')
+        m = re.search(r'/video/(\d{17,20})', path)
+        if m and 'tiktok.com' in host:
+            secs = int(m.group(1)) >> 32
+            return _ts_evidence(datetime.fromtimestamp(secs, tz=timezone.utc),
+                                0.95, 'platform:tiktok_id')
+    except (ValueError, OverflowError, OSError):
+        pass
+    return []
+
+
+def platform_fetch_date(url, timeout=(5, 15)):
+    """Timestamps that need one extra request to the platform itself:
+    Telegram (t.me embed page carries <time datetime>) and Facebook (the
+    page served to search crawlers embeds creation_time). Returns
+    (evidence, html_or_None). Never raises."""
+    import requests
+    host = urlparse(url).netloc.lower()
+    path = urlparse(url).path
+    try:
+        if host in ('t.me', 'telegram.me') and re.search(r'^/[A-Za-z0-9_]+/\d+/?$', path):
+            r = requests.get(url.split('?')[0] + '?embed=1', headers=CRAWLER_UA,
+                             timeout=timeout)
+            m = re.search(r'<time[^>]+datetime="([^"]+)"', r.text or '')
+            dt = parse_date(m.group(1)) if m else None
+            if dt:
+                return [{'date': to_iso(dt), 'confidence': 0.95,
+                         'source': 'platform:telegram_time'}], r.text
+            return [], r.text if r.status_code == 200 else None
+        if 'facebook.com' in host:
+            r = requests.get(url, headers=CRAWLER_UA, timeout=timeout)
+            if r.status_code != 200:
+                return [], None
+            m = re.search(r'"(?:creation_time|publish_time)":(\d{9,11})', r.text or '')
+            if m:
+                dt = datetime.fromtimestamp(int(m.group(1)), tz=timezone.utc)
+                ev = _ts_evidence(dt, 0.92, 'platform:facebook_creation_time')
+                return ev, r.text
+            return [], r.text
+    except Exception as e:
+        logger.info('platform fetch failed for %s: %s', url, e)
+    return [], None
 
 
 def url_path_date(url):

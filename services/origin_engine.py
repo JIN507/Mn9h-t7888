@@ -79,6 +79,15 @@ DEFAULT_BUDGET = {
 # false origins in live runs; such pages are reported as earlier_hints.
 FIRST_SEEN_MIN_CONFIDENCE = 0.84
 THUMBNAIL_MIN_PX = 250
+# A low-res engine thumbnail can confirm a *variant* only if the perceptual
+# hash agrees too: semantic embeddings score look-alike scenes (another
+# ship fire at dusk) above 0.94.
+THUMB_VARIANT_MAX_PHASH = 14
+# Temporal outlier: a single thumbnail-only variant dated this many days
+# before the dense cluster of strongly dated sightings is a look-alike
+# until proven otherwise (reported as a hint, never as first seen).
+OUTLIER_GAP_DAYS = 120
+OUTLIER_COMPANION_DAYS = 45
 
 
 def _noop(_msg):
@@ -438,10 +447,20 @@ def inspect_candidate(cand, query_sig, *, use_wayback=True, strict=False):
         if page is not None:
             html = page.text or ''
             headers = page.headers
+        # Platforms that refuse plain fetches or hide dates behind JS:
+        # ask them the way they answer (embed page / crawler UA). This
+        # also yields the post's HTML (og:image) for visual verification.
+        social = is_social(url)
+        if social and not any(e['confidence'] >= 0.9 for e in evidence):
+            ev, platform_html = de.platform_fetch_date(url)
+            evidence.extend(ev)
+            if platform_html and not html:
+                html = platform_html
+        if html:
             out['title'] = _title_from_html(html, out['title'])
             out['snippet'] = _page_text_snippet(html)
             evidence.extend(de.html_date_evidence(html, url))
-        else:
+        elif page is None:
             out['fetch_error'] = True
         visual = verify_html(html, url, query_sig,
                              extra_image_urls=cand.get('engine_images') or [],
@@ -454,6 +473,13 @@ def inspect_candidate(cand, query_sig, *, use_wayback=True, strict=False):
     out['visual'] = {k: visual.get(k) for k in
                      ('verdict', 'match_kind', 'similarity', 'phash_distance',
                       'matched_image_url')}
+    out['visual']['matched_from'] = matched_from
+    if (out['visual']['verdict'] == 'confirmed' and out['visual']['match_kind'] == 'variant'
+            and matched_from == 'engine'
+            and (out['visual']['phash_distance'] is None
+                 or out['visual']['phash_distance'] > THUMB_VARIANT_MAX_PHASH)):
+        out['visual']['verdict'] = 'ambiguous'
+        out['visual']['note'] = 'engine thumbnail: embedding agrees, hash does not'
     if size:
         out['image_size'] = list(size)
         # A tiny variant is a sidebar/related-post thumbnail, not the page's
@@ -556,6 +582,8 @@ def _eligible_first(item):
     v = item['visual']['verdict']
     if v == 'rejected' or item.get('dropped') or item.get('is_listing'):
         return False
+    if item.get('temporal_outlier'):
+        return False
     if item['visual'].get('thumbnail_only') or item.get('is_lower_bound'):
         return False
     if not item['published_at'] or item['confidence'] < FIRST_SEEN_MIN_CONFIDENCE:
@@ -577,10 +605,38 @@ def _first_seen_key(item):
     return (item['published_at'][:10], -item['confidence'], item['published_at'])
 
 
+def _days(iso):
+    from datetime import datetime
+    return datetime.strptime(iso[:10], '%Y-%m-%d').toordinal()
+
+
+def _is_temporal_outlier(item, eligible):
+    """True when `item` is a thumbnail-only variant far ahead of the
+    cluster of strongly dated sightings, with no companion near its date."""
+    v = item['visual']
+    if not (v.get('match_kind') == 'variant' and v.get('matched_from') == 'engine'):
+        return False
+    strong = sorted(_days(i['published_at']) for i in eligible
+                    if i is not item and i.get('confidence', 0) >= 0.9)
+    if len(strong) < 5:
+        return False
+    d = _days(item['published_at'])
+    cluster_start = strong[len(strong) // 10]            # 10th percentile
+    if d >= cluster_start - OUTLIER_GAP_DAYS:
+        return False
+    companions = [x for x in strong if abs(x - d) <= OUTLIER_COMPANION_DAYS]
+    return not companions
+
+
 def assess(timeline):
     dated = [i for i in timeline if _eligible_first(i)]
     dated.sort(key=_first_seen_key)
-    return dated[0] if dated else None
+    for i in dated:
+        if _is_temporal_outlier(i, dated):
+            i['temporal_outlier'] = True
+        else:
+            return i
+    return None
 
 
 def earlier_hints(timeline, first_seen, limit=5):
@@ -721,7 +777,7 @@ def _public_item(i):
     keep = ('url', 'domain', 'title', 'match_type', 'providers', 'thumbnail',
             'published_at', 'confidence', 'evidence', 'bound', 'is_upper_bound',
             'visual', 'captured_at', 'image_size', 'origin_round', 'is_listing',
-            'is_lower_bound')
+            'is_lower_bound', 'temporal_outlier')
     item = {k: i.get(k) for k in keep}
     item['link'] = i['url']
     item['type'] = i['match_type']

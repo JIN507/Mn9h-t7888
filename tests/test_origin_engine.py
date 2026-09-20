@@ -196,6 +196,80 @@ def test_thumbnail_only_and_image_upload_date_rules(monkeypatch):
     assert oe.to_search_payload({'success': True, 'timeline': [item]})['timeline'][0]['date_found']         == 'ليس قبل 2025-05-01'
 
 
+def test_inspect_candidate_dates_facebook_via_crawler_html(monkeypatch):
+    """Plain fetch of a Facebook post fails (400); the crawler-UA page
+    gives creation_time AND the og:image used for visual verification."""
+    monkeypatch.setattr(oe, 'fetch_page', lambda url, timeout=None: None)
+    fb_html = '<html><meta property="og:image" content="https://look/x.jpg"></html>'
+    monkeypatch.setattr(oe.de, 'platform_fetch_date',
+                        lambda url, timeout=None: ([{'date': '2024-07-21T20:46:08Z', 'confidence': 0.92,
+                                                     'source': 'platform:facebook_creation_time'}], fb_html))
+    seen = {}
+
+    def verify(html, url, sig, **kw):
+        seen['html'] = html
+        return {'verdict': 'confirmed', 'match_kind': 'variant', 'similarity': 0.95,
+                'phash_distance': 8, 'checked_images': 1,
+                'matched_image_url': 'https://look/x.jpg', 'matched_size': (800, 600),
+                'matched_from': 'page'}
+    monkeypatch.setattr(oe, 'verify_html', verify)
+    cand = {'url': 'https://www.facebook.com/groups/1/posts/2/', 'canonical': 'https://facebook.com/groups/1/posts/2',
+            'domain': 'facebook.com', 'match_type': 'exact', 'providers': ['google_lens'],
+            'engine_images': [], 'thumbnail': None, 'crawl_date': None, 'is_image': False}
+    item = oe.inspect_candidate(cand, {'phash': 'p'}, use_wayback=False)
+    assert item['published_at'] == '2024-07-21T20:46:08Z'
+    assert item['confidence'] >= 0.9 and not item.get('fetch_error')
+    assert seen['html'] == fb_html                       # verified against the crawler page
+    assert oe._eligible_first(item)
+
+
+def _conf(url, date, sim, phash, matched_from='page', kind='variant', conf=0.95):
+    return {'url': url, 'published_at': date, 'confidence': conf, 'match_type': 'exact',
+            'visual': {'verdict': 'confirmed', 'match_kind': kind, 'similarity': sim,
+                       'phash_distance': phash, 'matched_from': matched_from}}
+
+
+def test_temporal_outlier_thumbnail_variant_is_not_first():
+    """Live finding: a 2022 Instagram post scored 0.946 against Google's
+    thumbnail of a DIFFERENT ship fire; 27 strongly dated sightings put the
+    photo in July 2024. The lone early thumbnail match is an outlier."""
+    cluster = [_conf(f'https://n{i}.example/a', f'2024-07-{19 + i % 4:02d}T10:00:00Z', 0.97, 6)
+               for i in range(8)]
+    true_origin = _conf('https://x.com/IndiaCoastGuard/status/1814337329387175999',
+                        '2024-07-19T16:31:42Z', 0.911, 10, matched_from='engine', conf=0.99)
+    impostor = _conf('https://www.instagram.com/p/CflCdnFt87y/', '2022-07-04T05:32:06Z',
+                     0.946, 12, matched_from='engine')
+    first = oe.assess(cluster + [true_origin, impostor])
+    assert first['url'] == true_origin['url']
+    assert impostor.get('temporal_outlier') is True
+    # a genuinely old origin with a page-hosted image or a companion stays eligible
+    old_page = _conf('https://old.example/2022/07/04/story', '2022-07-04T00:00:00Z', 0.97, 5)
+    assert oe.assess(cluster + [old_page])['url'] == old_page['url']
+
+
+def test_engine_thumbnail_variant_needs_phash_agreement(monkeypatch):
+    monkeypatch.setattr(oe, 'fetch_page', lambda url, timeout=None: type('P', (), {'text': '<html></html>', 'headers': {}})())
+    monkeypatch.setattr(oe.de, 'platform_fetch_date', lambda url, timeout=None: ([], None))
+
+    def verify(phash):
+        return lambda html, url, sig, **kw: {
+            'verdict': 'confirmed', 'match_kind': 'variant', 'similarity': 0.946,
+            'phash_distance': phash, 'checked_images': 1, 'matched_from': 'engine',
+            'matched_image_url': 'https://encrypted-tbn0.gstatic.com/images?q=x',
+            'matched_size': (259, 194)}
+    cand = {'url': 'https://www.instagram.com/p/CflCdnFt87y/', 'canonical': 'https://instagram.com/p/CflCdnFt87y',
+            'domain': 'instagram.com', 'match_type': 'exact', 'providers': ['google_lens'],
+            'engine_images': ['https://encrypted-tbn0.gstatic.com/images?q=x'],
+            'thumbnail': None, 'crawl_date': None, 'is_image': False}
+    monkeypatch.setattr(oe, 'verify_html', verify(16))
+    item = oe.inspect_candidate(cand, {'phash': 'p'}, use_wayback=False)
+    assert item['visual']['verdict'] == 'ambiguous' and not oe._eligible_first(item)
+    monkeypatch.setattr(oe, 'verify_html', verify(10))
+    item = oe.inspect_candidate(cand, {'phash': 'p'}, use_wayback=False)
+    assert item['visual']['verdict'] == 'confirmed' and oe._eligible_first(item)
+    assert item['published_at'].startswith('2022-07-04')        # instagram shortcode date
+
+
 def test_assess_same_day_exact_timestamp_beats_day_precision():
     """Live finding (Maersk Frankfurt fire): htmldate gave a news site
     2024-07-19T00:00:00Z while the Coast Guard tweet ID gave 16:31:42Z the
