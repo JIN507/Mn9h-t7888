@@ -289,7 +289,7 @@ def harvest_engine(name, image_url):
         return [], {'ok': False, 'count': 0, 'note': str(e)[:120]}
 
 
-MAX_EXTRA_FRAMES = 3          # extra frames that get their own Lens search
+MAX_EXTRA_FRAMES = 7          # extra frames that get their own Lens search (a clip's scenes differ)
 MAX_SIGNATURE_FRAMES = 11     # extra frames used for visual matching
 VIDEO_CONSENSUS_MIN = 5       # ambiguous sightings of the same scene ...
 VIDEO_CONSENSUS_SIM = 0.78    # ... at least this similar ...

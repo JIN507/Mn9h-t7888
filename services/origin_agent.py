@@ -593,7 +593,7 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
     extra_frame_urls: other frames of the same video (video mode)."""
     progress = progress or _noop
     budget = {**DEFAULT_BUDGET, **(budget or {})}
-    extra_frame_urls = [u for u in (extra_frame_urls or []) if u][:oe.MAX_EXTRA_FRAMES]
+    extra_frame_urls = [u for u in (extra_frame_urls or []) if u][:oe.MAX_SIGNATURE_FRAMES]
     if not os.environ.get('SERPAPI_API_KEY'):
         return oe._empty('SerpAPI key not configured')
     if not deepseek.configured():
