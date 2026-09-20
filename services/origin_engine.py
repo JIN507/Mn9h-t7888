@@ -678,9 +678,19 @@ def video_consensus(timeline):
     sightings of the same scene cluster within a few days, the clip is
     the same clip. Marks that cluster 'probable' (clearly labeled) so an
     earliest sighting can be named. Returns the number promoted."""
-    if any(i['visual']['verdict'] == 'confirmed' for i in timeline):
+    # Judge each scene (source frame) on its own: a confirmed match for the
+    # officer scene says nothing about the tower-fire scene.
+    frames = sorted({f for i in timeline for f in (i.get('frames') or [1])})
+    if len(frames) > 1:
+        return sum(_video_consensus_scene(timeline, f) for f in frames)
+    return _video_consensus_scene(timeline, None)
+
+
+def _video_consensus_scene(timeline, frame):
+    scene = [i for i in timeline if frame is None or frame in (i.get('frames') or [1])]
+    if any(i['visual']['verdict'] in ('confirmed', 'probable') for i in scene):
         return 0
-    pool = [i for i in timeline
+    pool = [i for i in scene
             if i['visual']['verdict'] == 'ambiguous' and i.get('published_at')
             and (i['visual'].get('similarity') or 0) >= VIDEO_CONSENSUS_SIM
             and not i.get('is_listing')]

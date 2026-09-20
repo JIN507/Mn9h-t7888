@@ -59,7 +59,12 @@ def test_video_consensus_promotes_clustered_ambiguous_sightings():
     assert tl[-2]['visual']['verdict'] == 'ambiguous' and tl[-1]['visual']['verdict'] == 'ambiguous'
     # never promotes when a real confirmation exists, or the cluster is thin
     confirmed = dict(amb('https://c.example/p', '2026-03-08T09:00:00Z'), visual={'verdict': 'confirmed', 'match_kind': 'exact', 'similarity': 0.99})
-    assert oe.video_consensus([confirmed] + tl[:5]) == 0
+    assert oe.video_consensus([confirmed] + [amb(f'https://z{i}.example', '2026-03-08T10:00:00Z') for i in range(5)]) == 0
+    # ...but a confirmed match in ANOTHER scene does not block this scene
+    other_scene = dict(confirmed, frames=[1])
+    fire = [dict(amb(f'https://f{i}.example', '2026-03-08T10:00:00Z'), frames=[6]) for i in range(5)]
+    assert oe.video_consensus([other_scene] + fire) == 5
+    assert all(i['visual']['verdict'] == 'probable' for i in fire)
     assert oe.video_consensus([amb(f'https://t{i}.example', '2026-03-08T10:00:00Z') for i in range(3)]) == 0
 
 
