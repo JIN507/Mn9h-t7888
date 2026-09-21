@@ -84,8 +84,8 @@ def test_image_mode_runs_origin_engine(client):
 def test_serpapi_down_falls_back_to_legacy_lens_scrape(client):
     """Every Origin-Engine engine fails AND Zenserp fails twice -> the legacy
     Lens scrape path (also SerpAPI) is the last resort; here it works."""
-    # Origin Engine: lens exact en/ar (x3 with retries) + lens visual + yandex
-    for _ in range(8):
+    # Origin Engine: lens exact en/ar (x3 with retries) + lens visual + yandex + google_reverse
+    for _ in range(9):
         responses.add(responses.GET, SERP, status=429, body='quota')
     responses.add(responses.GET, ZEN, json={'errors': {'unknown_error': 'x'}},
                   status=500)

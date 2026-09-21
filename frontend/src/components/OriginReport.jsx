@@ -10,7 +10,7 @@ export const ENGINE_LABELS = {
     lens_exact_en: 'Lens (EN)', lens_exact_ar: 'Lens (AR)', lens_visual: 'Lens مشابه',
     vision: 'Google Vision', tineye: 'TinEye', tineye_web: 'TinEye (موقع)', yandex: 'Yandex',
     bing: 'Bing', bing_web: 'Bing (موقع)', lens_pivot: 'Lens (الأصل)', text_pivot: 'بحث نصي',
-    grok: 'Grok', youtube: 'YouTube', prescreen: 'فرز المصغّرات',
+    grok: 'Grok', youtube: 'YouTube', prescreen: 'فرز المصغّرات', google_reverse: 'Google صفحات مطابقة',
 };
 
 export const TOOL_LABELS = {

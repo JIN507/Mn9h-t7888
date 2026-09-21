@@ -86,6 +86,43 @@ def upload_bytes(data, key, content_type='application/octet-stream'):
         return None
 
 
+def public_base_url():
+    """Where this app is reachable from the internet (production):
+    PUBLIC_BASE_URL, else Render's RENDER_EXTERNAL_URL. Empty locally."""
+    return (os.environ.get('PUBLIC_BASE_URL') or os.environ.get('RENDER_EXTERNAL_URL') or '').rstrip('/')
+
+
+def media_token(key):
+    """Unguessable token for a public media path (HMAC of the object key)."""
+    import hashlib
+    import hmac
+    secret = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+    return hmac.new(secret.encode(), key.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def public_media_url(key):
+    """Plain public URL of a private object, served through /api/media by
+    this app — what reverse-image engines (Yandex) can fetch. None when the
+    app has no public base URL (local dev)."""
+    base = public_base_url()
+    if not base or not key:
+        return None
+    return f'{base}/api/media/{media_token(key)}/{key}'
+
+
+def key_from_presigned_url(url):
+    """'https://acct.r2.cloudflarestorage.com/<bucket>/uploads/x.jpg?...' -> 'uploads/x.jpg'"""
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(url)
+        if 'r2.cloudflarestorage.com' not in p.netloc:
+            return None
+        parts = p.path.lstrip('/').split('/', 1)
+        return parts[1] if len(parts) == 2 and parts[1] else None
+    except Exception:
+        return None
+
+
 def presigned_get_url(key, expires=PRESIGN_EXPIRES):
     """Short-lived GET URL for a private object. Returns None on failure."""
     try:

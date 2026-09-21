@@ -32,7 +32,7 @@ from providers import deepseek
 from providers import tineye as tineye_provider
 from providers import wayback as wayback_provider
 from providers import yandex as yandex_provider
-from providers.serpapi import lens_matches
+from providers.serpapi import lens_matches, reverse_image_pages
 from providers import vision as vision_provider
 from providers.vision import vision_web_detection
 from services import date_evidence as de
@@ -223,6 +223,16 @@ def search_copy_url(image_bytes, image_url):
         key = parsed.path.lstrip('/').split('/', 1)[-1]   # drop the bucket segment
         if key:
             return f'{public_base}/{key}'
+    # Option A2: this app is public (production): serve the object ourselves
+    # at /api/media/<token>/<key> — a plain URL every engine accepts.
+    try:
+        from providers import storage as _storage
+        key = _storage.key_from_presigned_url(image_url)
+        via_app = _storage.public_media_url(key) if key else None
+        if via_app:
+            return via_app
+    except Exception as e:
+        logger.debug('public media url unavailable: %s', e)
     # Option B: an expiring ImgBB copy.
     if not os.environ.get('IMGBB_API_KEY'):
         logger.warning('search copy: no R2_PUBLIC_BASE_URL and no IMGBB_API_KEY — '
@@ -252,6 +262,8 @@ def engine_table(image_url, *, include_visual=True):
     if include_visual:
         tasks['lens_visual'] = lambda: lens_matches(
             image_url, 'visual_matches', hl='en', country='us')
+    if os.environ.get('GOOGLE_REVERSE_IMAGE', 'true').lower() != 'false':
+        tasks['google_reverse'] = lambda: reverse_image_pages(image_url, hl='en', country='us')
     unavailable = {}
     if not tineye_provider.configured():
         tasks.pop('tineye')
@@ -272,7 +284,7 @@ def engine_table(image_url, *, include_visual=True):
 
 
 ENGINE_NAMES = ('lens_exact_en', 'lens_exact_ar', 'lens_visual', 'yandex',
-                'tineye', 'tineye_web', 'vision', 'bing_web')
+                'tineye', 'tineye_web', 'vision', 'bing_web', 'google_reverse')
 
 
 def harvest_engine(name, image_url):

@@ -23,6 +23,45 @@ class SerpApiProvider(BaseProvider):
 _provider = SerpApiProvider()
 
 
+def reverse_image_pages(image_url, hl='en', country='us'):
+    """Legacy Google "search by image" (`engine=google_reverse_image`).
+
+    Harvests ONLY `image_results` — Google's "pages that include matching
+    images" — a different index from Lens, worth a second net. Never
+    `inline_images` / organic text results. Rows are 'page_match'
+    candidates and go through the thumbnail pre-screen like everything else.
+    """
+    params = {
+        'engine': 'google_reverse_image',
+        'image_url': image_url,
+        'api_key': os.environ.get('SERPAPI_API_KEY'),
+        'hl': hl,
+        'gl': country,
+    }
+    resp = _provider.request('GET', SEARCH_URL, params=params)
+    logger.info('google_reverse_image status=%s', resp.status_code)
+    if resp.status_code != 200:
+        raise requests.RequestException(
+            f'SerpAPI HTTP {resp.status_code}: {resp.text[:200]}')
+    data = resp.json()
+    out = []
+    for item in data.get('image_results') or []:
+        if not isinstance(item, dict):
+            continue
+        link = item.get('link')
+        if not link or not str(link).startswith('http'):
+            continue
+        match = Candidate(link=link, title=item.get('title', '') or '',
+                          thumbnail=item.get('thumbnail'),
+                          match_type='page_match',
+                          provider='google_reverse_image').to_dict()
+        if item.get('thumbnail'):
+            match['image_url'] = item['thumbnail']
+        out.append(match)
+    logger.info('google_reverse_image returned %d matching pages', len(out))
+    return out
+
+
 def lens_matches(image_url, lens_type, hl='ar', country='sa', no_cache=False):
     """One Google Lens call (`type=exact_matches` or `visual_matches`).
 

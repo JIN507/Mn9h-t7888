@@ -129,8 +129,8 @@ TOOLS = [
                        'ones) plus the current best finding.',
         'parameters': {'type': 'object', 'properties': {
             'engine': {'type': 'string',
-                       'enum': ['lens_exact', 'lens_visual', 'yandex',
-                                'tineye', 'bing']},
+                       'enum': ['lens_exact', 'lens_visual', 'google_reverse',
+                                'yandex', 'tineye', 'bing']},
             'image_url': {'type': 'string',
                           'description': 'Optional: search with a different '
                                          'copy of the image, e.g. a higher-'
@@ -202,6 +202,7 @@ TOOLS = [
 ENGINE_MAP = {
     'lens_exact': ('lens_exact_en', 'lens_exact_ar'),
     'lens_visual': ('lens_visual',),
+    'google_reverse': ('google_reverse',),
     'yandex': ('yandex',),
     'tineye': ('tineye', 'tineye_web'),
     'bing': ('bing_web',),

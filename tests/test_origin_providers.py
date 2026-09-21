@@ -50,6 +50,27 @@ def test_tineye_http_error_raises(monkeypatch):
         tineye.search_by_url('https://img.example/a.jpg')
 
 
+# ------------------------------------------------- Google reverse image
+
+@responses.activate
+def test_google_reverse_image_harvests_matching_pages_only():
+    from providers import serpapi
+    responses.add(responses.GET, SERP, json={
+        'image_results': [
+            {'position': 1, 'title': 'Story', 'link': 'https://news.example/story',
+             'thumbnail': 'https://t/1.jpg', 'snippet': 'x'},
+            {'position': 2, 'title': 'bad', 'link': 'javascript:void(0)'},
+        ],
+        'inline_images': [{'link': 'https://never.example/img'}],
+        'organic_results': [{'link': 'https://never.example/text'}],
+    }, status=200)
+    got = serpapi.reverse_image_pages('https://img.example/a.jpg')
+    assert [(g['link'], g['match_type'], g['provider']) for g in got] == \
+        [('https://news.example/story', 'page_match', 'google_reverse_image')]
+    assert got[0]['image_url'] == 'https://t/1.jpg'
+    assert 'engine=google_reverse_image' in responses.calls[0].request.url
+
+
 # ---------------------------------------------------------------- Yandex
 
 @responses.activate

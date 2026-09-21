@@ -12,6 +12,32 @@ logger = logging.getLogger(__name__)
 bp = Blueprint('media', __name__)
 
 
+@bp.route('/api/media/<token>/<path:key>', methods=['GET'])
+def public_media(token, key):
+    """Serve a private R2 object at a plain public URL (token-gated) so
+    reverse-image engines that refuse presigned links can fetch the query
+    image. Streams through the app; short cache."""
+    import hmac
+    import requests
+    from flask import Response, abort
+    from providers import storage
+    if not key.startswith('uploads/') or not hmac.compare_digest(token, storage.media_token(key)):
+        abort(404)
+    src = storage.presigned_get_url(key)
+    if not src:
+        abort(404)
+    try:
+        upstream = requests.get(src, stream=True, timeout=(5, 30))
+    except requests.RequestException:
+        abort(502)
+    if upstream.status_code != 200:
+        abort(404)
+    ctype = upstream.headers.get('Content-Type') or 'image/jpeg'
+    return Response(upstream.iter_content(64 * 1024), status=200,
+                    headers={'Content-Type': ctype, 'Cache-Control': 'public, max-age=3600',
+                             'X-Robots-Tag': 'noindex'})
+
+
 @bp.route('/api/extract-frames', methods=['POST'])
 def extract_frames_api():
     """API endpoint to extract frames from uploaded video"""
