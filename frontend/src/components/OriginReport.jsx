@@ -172,7 +172,7 @@ const KeyFacts = ({ report, videoMode, frames }) => {
     const fs = report.firstSeen;
     const ctx = report.agent?.image_context || {};
     const when = fmtDateTime(fs?.published_at);
-    const place = ctx.place_guess || null;
+    const place = ctx.place_guess_ar || ctx.place_guess || null;
     const platform = fs ? platformOf(fs.url) : null;
     const hasMore = Boolean(report.narrative || report.videoSummary || (frames && frames.length));
     if (!fs && !hasMore) return null;
