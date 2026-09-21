@@ -38,7 +38,8 @@ from providers.vision import vision_web_detection
 from services import date_evidence as de
 from services.visual_verify import (build_query_signature,
                                     build_query_signature_from_url,
-                                    fetch_page, verify_html)
+                                    fetch_page, verify_html, _hash_distance)
+from services.embedding_service import cosine_similarity, embed_image
 
 logger = logging.getLogger(__name__)
 
@@ -380,6 +381,103 @@ def merge_candidates(matches, seen=None):
     return list(merged.values())
 
 
+# ------------------------------------------------------------- prescreen
+
+PRESCREEN_MAX = 400
+PRESCREEN_WORKERS = 16
+PRESCREEN_TIMEOUT_S = 45
+PRESCREEN_MATCH_PHASH = 12
+PRESCREEN_MATCH_SIM = 0.85
+PRESCREEN_REJECT_SIM = 0.60
+PRESCREEN_REJECT_PHASH = 20
+
+
+def _fetch_thumb(url, timeout=(3, 6)):
+    """Small engine thumbnail -> PIL image, or None."""
+    import io
+    from PIL import Image
+    from services.visual_verify import UA, MAX_IMAGE_BYTES
+    try:
+        r = requests.get(url, headers=UA, timeout=timeout, stream=True)
+        r.raise_for_status()
+        data = r.raw.read(MAX_IMAGE_BYTES + 1, decode_content=True)
+        if len(data) > MAX_IMAGE_BYTES:
+            return None
+        return Image.open(io.BytesIO(data)).convert('RGB')
+    except Exception:
+        return None
+
+
+def _score_thumb(pil, sigs, query_embeddings):
+    distances = [d for d in (_hash_distance(s, pil) for s in sigs) if d is not None]
+    phash = min(distances) if distances else None
+    sim = None
+    if query_embeddings:
+        emb = embed_image(pil)
+        sims = [x for x in (cosine_similarity(q, emb) for q in query_embeddings) if x is not None]
+        sim = max(sims) if sims else None
+    if (phash is not None and phash <= PRESCREEN_MATCH_PHASH) or \
+            (sim is not None and sim >= PRESCREEN_MATCH_SIM):
+        verdict = 'match'
+    elif sim is not None and sim < PRESCREEN_REJECT_SIM and \
+            (phash is None or phash > PRESCREEN_REJECT_PHASH):
+        verdict = 'reject'
+    else:
+        verdict = 'unknown'
+    return {'verdict': verdict, 'similarity': round(sim, 4) if sim is not None else None,
+            'phash_distance': phash}
+
+
+def prescreen_candidates(cands, query_sig, progress=None, *, limit=PRESCREEN_MAX):
+    """Compare each candidate's ENGINE THUMBNAIL to the query (no page
+    fetch). Sets cand['prescreen'] = {'verdict': match|reject|unknown,
+    'similarity', 'phash_distance'}. Engines return up to 400 rows; the
+    page budget covers ~50 — this decides which 50, on evidence instead
+    of heuristics. Returns (matches, rejects, unknown) counts."""
+    sigs = [s for s in (query_sig if isinstance(query_sig, list) else [query_sig]) if s]
+    if not sigs:
+        return 0, 0, len(cands)
+    query_embeddings = [s['embedding'] for s in sigs if s.get('embedding') is not None]
+    todo = [c for c in cands[:limit] if c.get('engine_images')]
+    for c in cands:
+        c.setdefault('prescreen', {'verdict': 'unknown'})
+    if not todo:
+        return 0, 0, len(cands)
+    if progress:
+        progress(f'فرز {len(todo)} مرشحاً بصرياً عبر المصغّرات...')
+
+    def work(c):
+        pil = None
+        for url in c['engine_images'][:2]:
+            pil = _fetch_thumb(url)
+            if pil is not None:
+                break
+        if pil is None:
+            return c, {'verdict': 'unknown', 'similarity': None, 'phash_distance': None}
+        return c, _score_thumb(pil, sigs, query_embeddings)
+
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=PRESCREEN_WORKERS)
+    futures = [ex.submit(work, c) for c in todo]
+    counts = {'match': 0, 'reject': 0, 'unknown': 0}
+    try:
+        for fut in concurrent.futures.as_completed(futures, timeout=PRESCREEN_TIMEOUT_S):
+            try:
+                c, res = fut.result()
+            except Exception:
+                continue
+            c['prescreen'] = res
+            counts[res['verdict']] = counts.get(res['verdict'], 0) + 1
+    except concurrent.futures.TimeoutError:
+        logger.warning('prescreen: timed out with %d thumbnails pending',
+                       sum(1 for f in futures if not f.done()))
+        for f in futures:
+            f.cancel()
+    finally:
+        ex.shutdown(wait=False)
+    logger.info('prescreen: %s', counts)
+    return counts['match'], counts['reject'], counts['unknown']
+
+
 def prioritize(candidates, limit, per_domain, by_frame=False):
     """Exact/TinEye/multi-engine first; cap per domain; cap total.
     by_frame (video): round-robin across the frames that produced the
@@ -404,8 +502,18 @@ def prioritize(candidates, limit, per_domain, by_frame=False):
                     if len(out) >= limit:
                         break
             return out
+    # thumbnails already compared: real matches first, clear misses dropped
+    candidates = [c for c in candidates
+                  if (c.get('prescreen') or {}).get('verdict') != 'reject'
+                  or c.get('crawl_date')]                     # TinEye-dated rows kept
+
     def score(c):
         s = MATCH_RANK.get(c['match_type'], 9) * 10
+        pre = c.get('prescreen') or {}
+        if pre.get('verdict') == 'match':
+            s -= 40                                   # thumbnail IS the image
+            if pre.get('phash_distance') is not None:
+                s -= max(0, 12 - pre['phash_distance'])
         s -= 4 * min(len(c['providers']), 3)          # corroborated by engines
         if c['crawl_date']:
             s -= 5                                    # TinEye dated it
@@ -931,7 +1039,11 @@ def investigate_origin(image_url, *, progress=None, budget=None,
     cands = merge_candidates(raw, seen)
     seen.update(c['canonical'] for c in cands)
     n_frames = 1 + len(extra_frame_urls or [])
+    matches, rejects, _ = prescreen_candidates(cands, query_sig, progress)
     limit = min(48, budget['max_inspect'] + 5 * (n_frames - 1))
+    limit = max(limit, min(60, matches))               # inspect every real match
+    engines_status['prescreen'] = {'ok': True, 'count': matches,
+                                   'note': f'{rejects} rejected by thumbnail'}
     chosen = prioritize(cands, limit, budget['per_domain'], by_frame=n_frames > 1)
     progress(f'{len(cands)} مرشحاً فريداً — فحص {len(chosen)} صفحة...')
     timeline = inspect_many(chosen, query_sig, budget['workers'], progress)

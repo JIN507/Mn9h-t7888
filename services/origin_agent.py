@@ -311,7 +311,8 @@ class Investigation:
                         and not i.get('dropped')],
                        key=oe._first_seen_key)
         pend = sorted(self.pending.values(),
-                      key=lambda c: oe.MATCH_RANK.get(c['match_type'], 9))
+                      key=lambda c: (0 if (c.get('prescreen') or {}).get('verdict') == 'match' else 1,
+                                     oe.MATCH_RANK.get(c['match_type'], 9)))
         social = [c for c in pend if oe.is_social(c['url'])]
         return {
             'current_first_seen': self.item_brief(fs) if fs else None,
@@ -326,7 +327,9 @@ class Investigation:
             'pending_social_posts': [{'url': c['url'], 'match': c['match_type']}
                                      for c in social[:6]],
             'pending_sample': [{'url': c['url'], 'match': c['match_type'],
-                                'engines': c['providers']} for c in pend[:8]],
+                                'engines': c['providers'],
+                                'thumbnail_check': (c.get('prescreen') or {}).get('verdict')}
+                               for c in pend[:8]],
             'budget_left': {'tool_calls': self.budget['max_tool_calls'] - self.tool_calls,
                             'inspections': self.budget['max_inspections'] - self.inspections,
                             'seconds': int(self.time_left())},
@@ -367,7 +370,9 @@ def tool_reverse_search(inv, engine, image_url=None):
         raw.extend(got)
     inv.progress(f'الوكيل: بحث عكسي ({engine})' + (' بنسخة أخرى من الصورة' if pivot else ''))
     new = inv.add_candidates(raw, round_no=len(inv.steps) + 1)
-    chosen = oe.prioritize(new, inv.budget['auto_inspect'], inv.budget['per_domain'])
+    matches, _, _ = oe.prescreen_candidates(new, inv.query_sig, None, limit=150)
+    chosen = oe.prioritize(new, max(inv.budget['auto_inspect'], min(20, matches)),
+                           inv.budget['per_domain'])
     if chosen:
         inv.progress(f'الوكيل: فحص {len(chosen)} صفحة جديدة')
     items = inv.inspect(chosen)
@@ -674,7 +679,11 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
                       extra_frame_urls=extra_frame_urls)
     cands = inv.add_candidates(raw, round_no=0)
     n_frames = 1 + len(extra_frame_urls)
+    matches, rejects, _ = oe.prescreen_candidates(cands, query_sig, progress)
+    inv.engines_status['prescreen'] = {'ok': True, 'count': matches,
+                                       'note': f'{rejects} rejected by thumbnail'}
     limit = min(48, budget['round0_inspect'] + 5 * (n_frames - 1))
+    limit = max(limit, min(60, matches))
     chosen = oe.prioritize(cands, limit, budget['per_domain'], by_frame=n_frames > 1)
     progress(f'{len(cands)} مرشحاً فريداً — فحص {len(chosen)} صفحة...')
     inv.inspect(chosen)
