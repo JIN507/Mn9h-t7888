@@ -82,6 +82,7 @@ def world(monkeypatch):
     monkeypatch.setattr(oe, '_browser_engine', lambda name: None)
     monkeypatch.setattr(oe.yandex_provider, 'reverse_image', lambda u: [])
     monkeypatch.setattr(oe.wayback_provider, 'earliest_capture', lambda u: None)
+    monkeypatch.setattr(oe.wayback_provider, 'archive_url', lambda u, **k: {'url': None, 'status': 'failed'})
     monkeypatch.setattr(oe, 'fetch_page',
                         lambda url, timeout=None: _FakePage(PAGES[url]) if url in PAGES else None)
     monkeypatch.setattr(oe, 'verify_html',

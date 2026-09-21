@@ -569,6 +569,30 @@ def _page_text_snippet(html, limit=600):
         return ''
 
 
+def _index_sighting(blob, url):
+    """Feed confirmed sightings into our own provenance index (item 4):
+    the next time this image is searched, we already know where it was."""
+    try:
+        import hashlib
+        from services.vector_index import index_bytes
+        index_bytes(blob, hashlib.sha256(blob).hexdigest(), source='sighting', ref_url=url)
+    except Exception as e:
+        logger.debug('sighting index skipped: %s', e)
+
+
+def internal_sightings(query_sig, limit=5):
+    """What our own index already knows about this image."""
+    try:
+        from services.vector_index import find_similar
+        sigs = query_sig if isinstance(query_sig, list) else [query_sig]
+        emb = next((s['embedding'] for s in sigs if s and s.get('embedding') is not None), None)
+        rows = find_similar(emb, limit=limit, min_similarity=0.92) if emb is not None else []
+        return [r for r in rows if r.get('similarity', 0) >= 0.92]
+    except Exception as e:
+        logger.debug('internal index lookup skipped: %s', e)
+        return []
+
+
 def inspect_candidate(cand, query_sig, *, use_wayback=True, strict=False):
     """One candidate -> dated + visually-verified sighting (never raises)."""
     url = cand['url']
@@ -582,6 +606,11 @@ def inspect_candidate(cand, query_sig, *, use_wayback=True, strict=False):
         'is_listing': is_listing_url(url), 'frames': cand.get('frames') or [1],
     }
     evidence = list(de.platform_date(url)) + list(de.url_path_date(url))
+    if cand.get('api_date'):
+        dt = de.parse_date(cand['api_date'])
+        if dt:
+            evidence.append({'date': de.to_iso(dt), 'confidence': 0.95,
+                             'source': cand.get('api_date_source') or 'platform:api'})
     bounds = []
     if cand.get('crawl_date'):
         dt = de.parse_date(cand['crawl_date'])
@@ -643,6 +672,8 @@ def inspect_candidate(cand, query_sig, *, use_wayback=True, strict=False):
             out['visual']['thumbnail_only'] = True
     if blob:
         out['captured_at'] = de.exif_capture_date(blob)
+        if out['visual']['verdict'] == 'confirmed':
+            _index_sighting(blob, url)
     if img_headers:
         evidence.extend(de.header_date_evidence(img_headers))
 
@@ -983,7 +1014,7 @@ def _public_item(i):
     keep = ('url', 'domain', 'title', 'match_type', 'providers', 'thumbnail',
             'published_at', 'confidence', 'evidence', 'bound', 'is_upper_bound',
             'visual', 'captured_at', 'image_size', 'origin_round', 'is_listing',
-            'is_lower_bound', 'temporal_outlier', 'probable', 'frames')
+            'is_lower_bound', 'temporal_outlier', 'probable', 'frames', 'archived')
     item = {k: i.get(k) for k in keep}
     item['link'] = i['url']
     item['type'] = i['match_type']
@@ -1030,6 +1061,9 @@ def investigate_origin(image_url, *, progress=None, budget=None,
     image_bytes = _download_bytes(image_url)
     query_sig = frame_signatures(image_bytes, extra_frame_urls)
     search_url = search_copy_url(image_bytes, image_url)
+    from services import file_forensics
+    forensics = file_forensics.analyze(image_bytes)
+    internal = internal_sightings(query_sig)
 
     # ---- round 0: harvest + inspect
     progress('جاري البحث في المحركات (Lens, Vision, TinEye, Yandex)...')
@@ -1111,6 +1145,8 @@ def investigate_origin(image_url, *, progress=None, budget=None,
         'visual_verification': _has_embedding(query_sig),
         'frames': 1 + len(extra_frame_urls or []),
     }
+    if first_seen:
+        first_seen['archived'] = wayback_provider.archive_url(first_seen['url'])
     payload = {
         'success': True,
         'engine': 'origin_engine',
@@ -1120,6 +1156,8 @@ def investigate_origin(image_url, *, progress=None, budget=None,
                     for f, i in sorted(earliest_by_frame(timeline).items())]
                    if extra_frame_urls else []),
         'timeline': [_public_item(i) for i in ordered],
+        'forensics': forensics,
+        'internal_sightings': internal,
         'stats': stats,
         'engines': engines_status,
         'rounds': rounds,
@@ -1202,6 +1240,8 @@ def to_search_payload(report):
         'earlier_hints': report.get('earlier_hints') or [],
         'scenes': report.get('scenes') or [],
         'video_summary': report.get('video_summary'),
+        'forensics': report.get('forensics'),
+        'internal_sightings': report.get('internal_sightings') or [],
         'raw': {},
     }
 

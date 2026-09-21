@@ -344,6 +344,7 @@ def fake_world(monkeypatch):
                         lambda u: (_ for _ in ()).throw(RuntimeError('yandex down')))
     monkeypatch.setattr(oe.tineye_provider, 'configured', lambda: False)
     monkeypatch.setattr(oe.wayback_provider, 'earliest_capture', wayback)
+    monkeypatch.setattr(oe.wayback_provider, 'archive_url', lambda u, **k: {'url': None, 'status': 'failed'})
     monkeypatch.setattr(oe, '_download_bytes', lambda u, timeout=None: b'\x89PNGfake')
     monkeypatch.setattr(oe, 'frame_signatures',
                         lambda b, extra: {'phash': 'p', 'dhash': 'd', 'embedding': [0.1]})

@@ -184,7 +184,8 @@ def direct_search_api():
                            if k in ('timeline', 'engine', 'first_seen',
                                     'narrative', 'engines', 'stats',
                                     'rounds', 'note', 'agent',
-                                    'earlier_hints', 'scenes', 'video_summary')}
+                                    'earlier_hints', 'scenes', 'video_summary',
+                                    'forensics', 'internal_sightings')}
                 payload.update({
                     'success': True,
                     'timeline': payload.get('timeline') or [],

@@ -112,7 +112,13 @@ SYSTEM_PROMPT = (
     '8. VIDEO queries: pages show other moments of the clip, so visual '
     'verdicts are often "ambiguous" or "probable" (many sightings of the '
     'same scene within days). Treat "probable" as the clip; still prefer '
-    'the earliest dated post from the account that filmed it.'
+    'the earliest dated post from the account that filmed it. Use '
+    'youtube_search with a description in the audience\'s language.\n'
+    '9. FILE FORENSICS in the image analysis (credit lines, creator, camera, '
+    'software, C2PA, AI-detector verdict) are strong leads: a credit line '
+    'names the publisher — web_search it. If the image is likely '
+    'AI-generated, say so in finish: there is no real-world origin, the '
+    'earliest poster is the creator.'
 )
 
 TOOLS = [
@@ -168,6 +174,19 @@ TOOLS = [
                          'description': 'What to find, in English, e.g. '
                                         '"earliest X post of this photo of ..."'}},
             'required': ['question']}}},
+    {'type': 'function', 'function': {
+        'name': 'youtube_search',
+        'description': 'Search YouTube itself (official API, exact upload '
+                       'times). Best for VIDEO queries: describe what the '
+                       'clip shows in the language of the audience. Results '
+                       'are leads with their poster pre-compared to the '
+                       'query frames. Optional before_date narrows to uploads '
+                       'before a date (YYYY-MM-DD).',
+        'parameters': {'type': 'object', 'properties': {
+            'query': {'type': 'string'},
+            'before_date': {'type': 'string'},
+            'lang': {'type': 'string', 'description': 'relevance language, e.g. ar, en'}},
+            'required': ['query']}}},
     {'type': 'function', 'function': {
         'name': 'finish',
         'description': 'End the investigation with your conclusion.',
@@ -456,6 +475,29 @@ def tool_grok_search(inv, question):
             'note': 'Leads are not evidence. inspect_pages the promising ones.'}
 
 
+def tool_youtube_search(inv, query, before_date=None, lang=None):
+    from providers import youtube
+    if not youtube.configured():
+        return {'error': 'youtube search not configured (YOUTUBE_API_KEY)'}
+    inv.progress(f'الوكيل: يبحث في يوتيوب «{(query or "")[:40]}»')
+    try:
+        raw = youtube.search_videos(query, published_before=before_date or None,
+                                    max_results=10, lang=lang or None)
+    except Exception as e:
+        inv.engines_status['youtube'] = {'ok': False, 'count': 0, 'note': str(e)[:120]}
+        return {'error': f'youtube search failed: {e}'}
+    new = inv.add_candidates(raw, round_no=len(inv.steps) + 1)
+    matches, _, _ = oe.prescreen_candidates(new, inv.query_sig, None, limit=50)
+    inv.engines_status['youtube'] = {'ok': True, 'count': len(raw)}
+    chosen = [c for c in new if (c.get('prescreen') or {}).get('verdict') == 'match'][:6]
+    items = inv.inspect(chosen) if chosen else []
+    leads = [{'url': c['url'], 'title': c.get('title', '')[:90], 'uploaded': c.get('api_date'),
+              'poster_check': (c.get('prescreen') or {}).get('verdict')} for c in new][:10]
+    return {'query': query, 'videos': leads, 'poster_matches_inspected': [inv.item_brief(i) for i in items],
+            'note': 'poster_check=match means the video poster IS the query frame; '
+                    'other videos are leads — inspect_pages to verify.'}
+
+
 def tool_read_page(inv, url):
     if not isinstance(url, str) or not url.startswith('http'):
         return {'error': 'bad url'}
@@ -501,6 +543,11 @@ def _summ(tool, args, result):
         if result.get('error'):
             return f"Grok: {result['error'][:60]}"
         return f"Grok → {len(result.get('leads', []))} رابطاً"
+    if tool == 'youtube_search':
+        if result.get('error'):
+            return f"YouTube: {result['error'][:60]}"
+        return (f"يوتيوب «{args.get('query', '')[:40]}» → {len(result.get('videos', []))} فيديو، "
+                f"{len(result.get('poster_matches_inspected', []))} مطابق")
     if tool == 'finish':
         return f"خلاصة ({args.get('confidence')})"
     return ''
@@ -559,6 +606,9 @@ def run_agent(inv, image_context):
                     result = tool_read_page(inv, args.get('url', ''))
                 elif name == 'grok_search':
                     result = tool_grok_search(inv, args.get('question', ''))
+                elif name == 'youtube_search':
+                    result = tool_youtube_search(inv, args.get('query', ''),
+                                                 args.get('before_date'), args.get('lang'))
                 elif name == 'finish':
                     finish = args
                     result = {'ok': True}
@@ -610,7 +660,11 @@ def _narrative(inv, image_context, first_seen, finish):
     hints = oe.earlier_hints(inv.timeline, first_seen)
     scenes = oe.earliest_by_frame(inv.timeline) if inv.extra_frames else {}
     scene_lines = '; '.join(f"الإطار {f}: {i['published_at'][:10]} {i['domain']}" for f, i in sorted(scenes.items()))
+    file_hints = (image_context or {}).get('file_forensics') or []
     user = ('وصف الصورة: ' + json.dumps((image_context or {}).get('description', ''), ensure_ascii=False)
+            + ('\nبيانات الملف: ' + '; '.join(file_hints) if file_hints else '')
+            + ('\nتنبيه: الصورة على الأرجح مولّدة بالذكاء الاصطناعي — لا يوجد حدث حقيقي، أول ناشر هو منشئها.'
+               if (image_context or {}).get('likely_ai_generated') else '')
             + ('\nفيديو من عدة مشاهد — أول ظهور لكل إطار: ' + scene_lines if scenes else '')
             + '\nأول ظهور مؤكد: ' + (f"{first_seen['published_at']} على {first_seen['domain']} ({first_seen['url']})" if first_seen else 'لا يوجد')
             + '\nمؤشرات أقدم ضعيفة التأريخ (ليست مؤكدة): ' + ('; '.join(f"{h['published_at'][:10]} {h['domain']}" for h in hints) or 'لا يوجد')
@@ -660,6 +714,18 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
         except Exception as e:
             logger.warning('vision failed: %s', e)
 
+    from services import file_forensics
+    forensics = file_forensics.analyze(image_bytes) if image_bytes else {}
+    internal = oe.internal_sightings(query_sig)
+    if isinstance(image_context, dict):
+        if forensics.get('hints'):
+            image_context['file_forensics'] = forensics['hints']
+        if forensics.get('likely_ai'):
+            image_context['likely_ai_generated'] = True
+        if internal:
+            image_context['seen_before_in_our_index'] = [
+                {'seen_at': r.get('seen_at'), 'source': r.get('source'), 'ref_url': r.get('ref_url')}
+                for r in internal]
     search_url = oe.search_copy_url(image_bytes, image_url)
     inv = Investigation(search_url, query_sig, progress, budget)
     inv.original_url = image_url
@@ -714,10 +780,15 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
         'visual_verification': oe._has_embedding(query_sig),
         'frames': 1 + len(extra_frame_urls),
     }
+    if first_seen:
+        progress('حفظ نسخة أرشيفية من المصدر...')
+        first_seen['archived'] = oe.wayback_provider.archive_url(first_seen['url'])
     payload = {
         'success': True,
         'engine': 'origin_engine',
         'first_seen': oe._public_item(first_seen) if first_seen else None,
+        'forensics': forensics,
+        'internal_sightings': internal,
         'earlier_hints': [oe._public_item(i) for i in oe.earlier_hints(inv.timeline, first_seen)],
         'scenes': ([{'frame': f, 'first_seen': oe._public_item(i)}
                     for f, i in sorted(oe.earliest_by_frame(inv.timeline).items())]

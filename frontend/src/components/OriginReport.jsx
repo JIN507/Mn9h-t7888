@@ -10,12 +10,12 @@ export const ENGINE_LABELS = {
     lens_exact_en: 'Lens (EN)', lens_exact_ar: 'Lens (AR)', lens_visual: 'Lens مشابه',
     vision: 'Google Vision', tineye: 'TinEye', tineye_web: 'TinEye (موقع)', yandex: 'Yandex',
     bing: 'Bing', bing_web: 'Bing (موقع)', lens_pivot: 'Lens (الأصل)', text_pivot: 'بحث نصي',
-    grok: 'Grok',
+    grok: 'Grok', youtube: 'YouTube', prescreen: 'فرز المصغّرات',
 };
 
 export const TOOL_LABELS = {
     reverse_search: 'بحث عكسي', inspect_pages: 'فحص صفحات', web_search: 'بحث نصي',
-    read_page: 'قراءة صفحة', grok_search: 'سؤال Grok', finish: 'الخلاصة',
+    read_page: 'قراءة صفحة', grok_search: 'سؤال Grok', youtube_search: 'بحث يوتيوب', finish: 'الخلاصة',
 };
 
 const EVIDENCE_LABELS = {
@@ -90,8 +90,40 @@ export const parseOriginPayload = (payload) => (
         earlierHints: payload.earlier_hints || [],
         scenes: payload.scenes || [],
         videoSummary: payload.video_summary || null,
+        forensics: payload.forensics || null,
+        internalSightings: payload.internal_sightings || [],
     } : null
 );
+
+const ForensicsLine = ({ forensics }) => {
+    if (!forensics) return null;
+    const bits = [];
+    const ex = forensics.exif || {}, ip = forensics.iptc || {}, xm = forensics.xmp || {};
+    const credit = ip.credit || xm.credit; const creator = ip.creator || xm.creator || ex.artist;
+    const software = ex.software || xm.creator_tool || xm.history_software;
+    if (credit) bits.push(`الجهة: ${credit}`);
+    if (creator) bits.push(`المصوّر: ${creator}`);
+    if (ex.make || ex.model) bits.push(`الكاميرا: ${[ex.make, ex.model].filter(Boolean).join(' ')}`);
+    if (software) bits.push(`البرنامج: ${software}`);
+    if (ex.datetime_original) bits.push(`التقاط: ${ex.datetime_original}`);
+    if (ex.gps) bits.push(`إحداثيات: ${ex.gps.lat}, ${ex.gps.lon}`);
+    if (forensics.c2pa?.present) bits.push(`اعتماد محتوى C2PA${forensics.c2pa.claim_generator ? ` (${forensics.c2pa.claim_generator})` : ''}`);
+    const ai = forensics.ai_detection;
+    return (
+        <div className="mt-3 space-y-1.5">
+            {forensics.likely_ai && (
+                <div className="p-2.5 bg-slate-800 text-white rounded-xl text-xs font-bold">
+                    على الأرجح صورة مولّدة بالذكاء الاصطناعي{ai?.ai_confidence ? ` (${Math.round(ai.ai_confidence * 100)}%)` : ''}{ai?.generator ? ` — ${ai.generator}` : ''}
+                    <span className="font-normal text-slate-300"> · لا يوجد حدث حقيقي لتتبعه، وأول ناشر هو منشئها</span>
+                </div>
+            )}
+            {!forensics.likely_ai && ai && ai.verdict && (
+                <p className="text-[10px] text-slate-400">كشف الذكاء الاصطناعي: {ai.verdict === 'human' ? 'حقيقية على الأرجح' : 'غير محسوم'}{typeof ai.ai_confidence === 'number' ? ` (احتمال التوليد ${Math.round(ai.ai_confidence * 100)}%)` : ''}</p>
+            )}
+            {bits.length > 0 && <p className="text-[10px] text-slate-500">بيانات الملف: {bits.join(' · ')}</p>}
+        </div>
+    );
+};
 
 const SavedBanner = ({ cached, onRerun, what }) => (
     cached ? (
@@ -145,8 +177,15 @@ export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = fal
                 </div>
             )}
 
+            <ForensicsLine forensics={report.forensics} />
+            {report.internalSightings?.length > 0 && (
+                <p className="text-[10px] text-slate-500 mt-2">
+                    شوهدت في قاعدة بياناتنا من قبل ({report.internalSightings.length}) — أول مرة <span dir="ltr">{(report.internalSightings.map(s => s.seen_at).filter(Boolean).sort()[0] || '').slice(0, 10)}</span>
+                </p>
+            )}
+
             {report.firstSeen ? (
-                <div className="flex gap-4">
+                <div className="flex gap-4 mt-3">
                     <Thumb item={report.firstSeen} size="w-28 h-28 md:w-36 md:h-28" />
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-2">
@@ -163,6 +202,12 @@ export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = fal
                                 الدليل: {report.firstSeen.evidence.slice(0, 3).map(e => evidenceLabel(e.source)).join(' · ')}
                                 {report.firstSeen.captured_at && <> · التقاط (EXIF) <span dir="ltr">{report.firstSeen.captured_at.slice(0, 10)}</span></>}
                             </p>
+                        )}
+                        {report.firstSeen.archived?.url && (
+                            <a href={report.firstSeen.archived.url} target="_blank" rel="noopener noreferrer"
+                                className="inline-block text-[10px] text-slate-500 hover:text-slate-900 mt-1 underline underline-offset-2">
+                                {report.firstSeen.archived.status === 'failed' ? 'البحث في الأرشيف' : 'نسخة محفوظة في أرشيف الإنترنت'}
+                            </a>
                         )}
                     </div>
                 </div>

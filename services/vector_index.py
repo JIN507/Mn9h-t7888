@@ -116,13 +116,14 @@ def find_similar(embedding, limit=5, min_similarity=0.90):
             from sqlalchemy import text
             vec = '[' + ','.join(str(float(x)) for x in embedding) + ']'
             rows = db.session.execute(text(
-                'SELECT media_hash, source, ref_url, '
+                'SELECT media_hash, source, ref_url, created_at, '
                 '       1 - (embedding_vec <=> :v) AS sim '
                 'FROM image_vectors WHERE embedding_vec IS NOT NULL '
                 'ORDER BY embedding_vec <=> :v LIMIT :k'),
                 {'v': vec, 'k': limit}).fetchall()
             return [{'media_hash': r.media_hash, 'similarity': float(r.sim),
-                     'source': r.source, 'ref_url': r.ref_url}
+                     'source': r.source, 'ref_url': r.ref_url,
+                     'seen_at': r.created_at.isoformat() if getattr(r, 'created_at', None) else None}
                     for r in rows if float(r.sim) >= min_similarity]
     except Exception as e:
         logger.debug('pgvector query failed, falling back to python: %s', e)
@@ -140,7 +141,8 @@ def find_similar(embedding, limit=5, min_similarity=0.90):
                 results.append({'media_hash': row.media_hash,
                                 'similarity': round(sim, 4),
                                 'source': row.source,
-                                'ref_url': row.ref_url})
+                                'ref_url': row.ref_url,
+                                'seen_at': row.created_at.isoformat() if row.created_at else None})
         results.sort(key=lambda r: r['similarity'], reverse=True)
         return results[:limit]
     except Exception as e:
