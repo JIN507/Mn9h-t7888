@@ -765,6 +765,15 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
     raw = oe._harvest(search_url, progress, inv.engines_status,
                       extra_frame_urls=extra_frame_urls)
     cands = inv.add_candidates(raw, round_no=0)
+    # A Lens locale that timed out is a hole in the net (the Arabic locale
+    # often carries the most for Arabic content): give it one more pass.
+    for name in ('lens_exact_en', 'lens_exact_ar'):
+        if (inv.engines_status.get(name) or {}).get('note') == 'timeout':
+            progress(f'إعادة محاولة {name} بعد انتهاء المهلة...')
+            got, st = oe.harvest_engine(name, search_url)
+            inv.engines_status[name] = dict(st, retried=True)
+            if got:
+                cands += inv.add_candidates(got, round_no=0)
     n_frames = 1 + len(extra_frame_urls)
     matches, rejects, _ = oe.prescreen_candidates(cands, query_sig, progress)
     inv.engines_status['prescreen'] = {'ok': True, 'count': matches,

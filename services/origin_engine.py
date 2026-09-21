@@ -146,7 +146,7 @@ def is_listing_url(url):
 # ------------------------------------------------------------------ harvest
 
 LENS_EXACT_RETRIES = 2
-HARVEST_TIMEOUT_S = 60     # slow engines are dropped, not waited for
+HARVEST_TIMEOUT_S = 90     # slow engines are dropped, not waited for (Lens retries can take ~75 s)
 INSPECT_TIMEOUT_S = 90     # per inspection batch
 LENS_RETRY_DELAY_S = float(os.environ.get('LENS_RETRY_DELAY_S', '2'))
 
