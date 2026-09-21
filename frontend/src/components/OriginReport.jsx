@@ -1,4 +1,5 @@
-import { Calendar, Award } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Calendar, Award, ChevronDown, MapPin, Clock, Globe } from 'lucide-react';
 import GlassCard from './GlassCard';
 import ErrorBanner from './ErrorBanner';
 
@@ -45,6 +46,19 @@ export const platformOf = (url) => {
     } catch { return ''; }
 };
 const thumbOf = (item) => item?.visual?.matched_image_url || item?.thumbnail || null;
+
+const FILTER_PLATFORMS = ['X', 'TikTok', 'Instagram', 'Facebook', 'Telegram', 'Reddit', 'YouTube'];
+export const platformCategory = (url) => {
+    const name = platformOf(url);
+    return FILTER_PLATFORMS.includes(name) ? name : 'ويب';
+};
+
+const fmtDateTime = (iso) => {
+    if (!iso) return null;
+    const d = iso.slice(0, 10);
+    const t = iso.length >= 16 && !iso.startsWith(d + 'T00:00:00') ? iso.slice(11, 16) + ' UTC' : null;
+    return { d, t };
+};
 
 export const Thumb = ({ item, size = 'w-14 h-14' }) => {
     const src = thumbOf(item);
@@ -139,9 +153,80 @@ const SavedBanner = ({ cached, onRerun, what }) => (
     ) : null
 );
 
+const FactTile = ({ icon: Icon, label, value, dir }) => (
+    <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-white border border-slate-200 min-w-0">
+        <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0">
+            <Icon className="w-4 h-4 text-slate-600" />
+        </div>
+        <div className="min-w-0">
+            <p className="text-[10px] text-slate-400 leading-none mb-1">{label}</p>
+            <p className="text-xs font-bold text-slate-800 truncate" dir={dir || 'auto'}>{value || '—'}</p>
+        </div>
+    </div>
+);
+
+/* Three quiet facts (when, where, which platform) and one toggle that
+   reveals the full narrative, the video description and the frames. */
+const KeyFacts = ({ report, videoMode, frames }) => {
+    const [open, setOpen] = useState(false);
+    const fs = report.firstSeen;
+    const ctx = report.agent?.image_context || {};
+    const when = fmtDateTime(fs?.published_at);
+    const place = ctx.place_guess || null;
+    const platform = fs ? platformOf(fs.url) : null;
+    const hasMore = Boolean(report.narrative || report.videoSummary || (frames && frames.length));
+    if (!fs && !hasMore) return null;
+    return (
+        <div className="mt-4">
+            {fs && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <FactTile icon={Clock} label="التاريخ"
+                        value={when ? `${when.d}${when.t ? ` · ${when.t}` : ''}` : null} dir="ltr" />
+                    <FactTile icon={MapPin} label="المكان" value={place} />
+                    <FactTile icon={Globe} label="المنصة" value={platform} dir="ltr" />
+                </div>
+            )}
+            {hasMore && (
+                <div className="mt-2">
+                    <button type="button" onClick={() => setOpen((v) => !v)}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:border-slate-300 hover:text-slate-900 transition-all">
+                        <span>{open ? 'إخفاء التفاصيل' : 'عرض التفاصيل'}</span>
+                        <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+                    </button>
+                    {open && (
+                        <div className="mt-2 p-3 rounded-xl bg-slate-50 border border-slate-100 space-y-3 animate-fade-in">
+                            {videoMode && report.videoSummary && (
+                                <div>
+                                    <p className="text-[10px] font-bold text-slate-500 mb-1">ما يظهر في الفيديو</p>
+                                    <p className="text-sm text-slate-700 leading-relaxed">{report.videoSummary}</p>
+                                </div>
+                            )}
+                            {report.narrative && (
+                                <div>
+                                    <p className="text-[10px] font-bold text-slate-500 mb-1">ملخص التحقيق</p>
+                                    <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{report.narrative}</p>
+                                </div>
+                            )}
+                            {frames && frames.length > 0 && (
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-[10px] text-slate-400">الإطارات المستخدمة في البحث:</span>
+                                    {frames.map((src, i) => (
+                                        <img key={i} src={src} alt="" className="w-10 h-8 object-cover rounded-md border border-slate-200" />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
 export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = false, frames = [] }) => {
     if (!report || !(report.firstSeen || report.narrative || report.videoSummary)) return null;
     const what = videoMode ? 'الفيديو' : 'الصورة';
+    void frames;
     return (
         <GlassCard className="ai-result-card p-6 border-slate-200 shadow-sm mb-6 animate-fade-in-up">
             <div className="absolute top-0 left-0 right-0 h-1 rounded-t-2xl bg-gradient-to-r from-slate-800 via-slate-600 to-slate-800" />
@@ -161,28 +246,6 @@ export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = fal
             </div>
 
             <SavedBanner cached={cached} onRerun={onRerun} what={what} />
-
-            {videoMode && (report.videoSummary || frames.length > 0) && (
-                <div className="mb-4 p-3 bg-slate-50 border border-slate-100 rounded-xl">
-                    <p className="text-[11px] font-bold text-slate-600 mb-1">ما هو هذا الفيديو؟</p>
-                    {report.videoSummary && <p className="text-sm text-slate-700 leading-relaxed">{report.videoSummary}</p>}
-                    {frames.length > 0 && (
-                        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                            <span className="text-[10px] text-slate-400">الإطارات المستخدمة في البحث:</span>
-                            {frames.map((src, i) => (
-                                <img key={i} src={src} alt="" className="w-10 h-8 object-cover rounded-md border border-slate-200" />
-                            ))}
-                        </div>
-                    )}
-                </div>
-            )}
-
-            <ForensicsLine forensics={report.forensics} />
-            {report.internalSightings?.length > 0 && (
-                <p className="text-[10px] text-slate-500 mt-2">
-                    شوهدت في قاعدة بياناتنا من قبل ({report.internalSightings.length}) — أول مرة <span dir="ltr">{(report.internalSightings.map(s => s.seen_at).filter(Boolean).sort()[0] || '').slice(0, 10)}</span>
-                </p>
-            )}
 
             {report.firstSeen ? (
                 <div className="flex gap-4 mt-3">
@@ -234,9 +297,7 @@ export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = fal
                 </div>
             )}
 
-            {report.narrative && (
-                <p className="text-sm text-slate-700 leading-relaxed mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100">{report.narrative}</p>
-            )}
+            <KeyFacts report={report} videoMode={videoMode} frames={frames} />
 
             {Object.keys(report.engines || {}).length > 0 && (
                 <p className="text-[10px] text-slate-400 mt-4" dir="ltr">
@@ -282,7 +343,16 @@ export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = fal
     );
 };
 
-export const TimelineCard = ({ report, timeline, cached = false, onRerun, error, engineNote, style }) => (
+export const TimelineCard = ({ report, timeline, cached = false, onRerun, error, engineNote, style }) => {
+    const [filter, setFilter] = useState('الكل');
+    const counts = useMemo(() => {
+        const c = {};
+        (timeline || []).forEach((it) => { const k = platformCategory(it.link); c[k] = (c[k] || 0) + 1; });
+        return c;
+    }, [timeline]);
+    const chips = ['الكل', ...FILTER_PLATFORMS, 'ويب'].filter((k) => k === 'الكل' || counts[k]);
+    const shown = (timeline || []).filter((it) => filter === 'الكل' || platformCategory(it.link) === filter);
+    return (
     <GlassCard className="ai-result-card p-6 border-slate-200 shadow-sm" style={style}>
         <div className="absolute top-0 left-0 right-0 h-1 rounded-t-2xl bg-gradient-to-r from-slate-600 via-slate-400 to-slate-600" />
         <div className="flex items-center gap-3 mb-5 pb-3 border-b border-slate-100">
@@ -312,9 +382,23 @@ export const TimelineCard = ({ report, timeline, cached = false, onRerun, error,
             </div>
         )}
 
+        {timeline && timeline.length > 1 && chips.length > 2 && (
+            <div className="flex items-center gap-1.5 flex-wrap mb-3">
+                {chips.map((k) => (
+                    <button key={k} type="button" onClick={() => setFilter(k)}
+                        className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all ${filter === k
+                            ? 'bg-slate-800 text-white border-slate-800'
+                            : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}
+                        dir={k === 'الكل' || k === 'ويب' ? 'rtl' : 'ltr'}>
+                        {k}<span className={`mr-1 text-[10px] ${filter === k ? 'text-slate-300' : 'text-slate-400'}`}>{k === 'الكل' ? (timeline || []).length : counts[k]}</span>
+                    </button>
+                ))}
+            </div>
+        )}
+
         {timeline && timeline.length > 0 ? (
             <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
-                {timeline.map((item, idx) => {
+                {shown.map((item, idx) => {
                     const isFirst = report?.firstSeen && item.link === report.firstSeen.url;
                     return (
                         <a key={idx} href={item.link} target="_blank" rel="noopener noreferrer"
@@ -338,4 +422,5 @@ export const TimelineCard = ({ report, timeline, cached = false, onRerun, error,
             !error && <div className="text-center text-slate-400 py-6 text-sm">لا يوجد سجل تاريخي.</div>
         )}
     </GlassCard>
-);
+    );
+};
