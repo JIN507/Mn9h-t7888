@@ -1037,6 +1037,28 @@ def _public_item(i):
 
 # --------------------------------------------------------------------- main
 
+def screenshot_crop_url(image_bytes):
+    """If the query is a screenshot of a post, host the embedded photo and
+    return (crop_bytes, crop_url, box); (None, None, None) otherwise.
+    Exact-match engines index the photo, never the screenshot composite."""
+    if not image_bytes or os.environ.get('SCREENSHOT_CROP', 'true').lower() == 'false':
+        return None, None, None
+    try:
+        from services.screenshot_crop import crop_photo
+        crop, box = crop_photo(image_bytes)
+        if not crop:
+            return None, None, None
+        from services.storage_service import host_image
+        url = host_image(crop, filename_hint='crop')
+        if not url:
+            return None, None, None
+        logger.info('screenshot detected: searching the embedded photo (box=%s)', box)
+        return crop, url, list(box)
+    except Exception as e:
+        logger.info('screenshot crop skipped: %s', e)
+        return None, None, None
+
+
 def frame_signatures(primary_bytes, extra_frame_urls):
     """Query signature list: the primary image + every downloadable extra
     frame (video mode). A single dict when there are no extras."""
@@ -1071,6 +1093,12 @@ def investigate_origin(image_url, *, progress=None, budget=None,
 
     progress('جاري تجهيز بصمة الصورة...')
     image_bytes = _download_bytes(image_url)
+    crop_bytes, crop_url, crop_box = screenshot_crop_url(image_bytes)
+    if crop_url:
+        # search the embedded photo; keep the screenshot itself as a 2nd signature
+        extra_frame_urls = [image_url] + list(extra_frame_urls or [])
+        engines_status['screenshot_crop'] = {'ok': True, 'count': 1, 'box': crop_box}
+        image_url, image_bytes = crop_url, crop_bytes
     query_sig = frame_signatures(image_bytes, extra_frame_urls)
     search_url = search_copy_url(image_bytes, image_url)
     from services import file_forensics

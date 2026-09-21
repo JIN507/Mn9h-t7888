@@ -12,6 +12,7 @@ export const ENGINE_LABELS = {
     vision: 'Google Vision', tineye: 'TinEye', tineye_web: 'TinEye (موقع)', yandex: 'Yandex',
     bing: 'Bing', bing_web: 'Bing (موقع)', lens_pivot: 'Lens (الأصل)', text_pivot: 'بحث نصي',
     grok: 'Grok', youtube: 'YouTube', prescreen: 'فرز المصغّرات', google_reverse: 'Google صفحات مطابقة',
+    screenshot_crop: 'اقتصاص لقطة الشاشة',
 };
 
 export const TOOL_LABELS = {

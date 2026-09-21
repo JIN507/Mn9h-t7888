@@ -722,6 +722,20 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
     from services import file_forensics
     forensics = file_forensics.analyze(image_bytes) if image_bytes else {}
     internal = oe.internal_sightings(query_sig)
+
+    # Screenshot of a post? Search the PHOTO inside it; the screenshot stays
+    # as an extra signature (and gets one Lens pass of its own).
+    crop_bytes, crop_url, crop_box = oe.screenshot_crop_url(image_bytes)
+    if crop_url:
+        extra_frame_urls = [image_url] + list(extra_frame_urls)
+        image_url, image_bytes = crop_url, crop_bytes
+        query_sig = oe.frame_signatures(image_bytes, extra_frame_urls)
+        if isinstance(image_context, dict):
+            image_context['screenshot_cropped'] = True
+            image_context['note_crop'] = ('The query was a screenshot of a post; the embedded '
+                                          'photo was cropped and is what the engines searched. '
+                                          'Account names / captions visible in the screenshot '
+                                          'are strong leads for web_search.')
     if isinstance(image_context, dict):
         if forensics.get('hints'):
             image_context['file_forensics'] = forensics['hints']
@@ -736,6 +750,8 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
     inv.original_url = image_url
     inv.image_bytes = image_bytes
     inv.extra_frames = extra_frame_urls
+    if crop_url:
+        inv.engines_status['screenshot_crop'] = {'ok': True, 'count': 1, 'box': crop_box}
     inv.llm_calls += 1 if image_context is not None else 0
     if extra_frame_urls and isinstance(image_context, dict):
         image_context['video_mode'] = True
