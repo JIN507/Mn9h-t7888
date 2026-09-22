@@ -86,6 +86,30 @@ export const ProbablePill = ({ item }) => (
     item?.probable ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600" title="فيديو: عدة ظهورات لنفس المشهد خلال أيام — مطابقة محتملة وليست مؤكدة">مطابقة محتملة</span> : null
 );
 
+/** Visual-verification state of a sighting: silent when confirmed; a quiet
+ *  marker when the page's image could not be tied to the query. */
+export const VerdictPill = ({ item }) => {
+    const v = item?.visual?.verdict;
+    if (!v || v === 'confirmed' || v === 'probable') return null;
+    const label = v === 'ambiguous' ? 'غير مؤكد بصرياً' : v === 'rejected' ? 'صورة مختلفة' : 'لم يُتحقق بصرياً';
+    const title = v === 'ambiguous'
+        ? `تشابه ${item.visual.similarity != null ? Math.round(item.visual.similarity * 100) + '%' : 'جزئي'} — لم تثبت المطابقة الهندسية`
+        : 'تعذّر مقارنة صورة الصفحة بالصورة المرفوعة';
+    return <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-dashed border-slate-300 text-slate-500" title={title}>{label}</span>;
+};
+
+/** Variant marker: the page holds a re-framed / restored / recoloured copy
+ *  confirmed by keypoint geometry rather than a hash-identical file. */
+export const VariantPill = ({ item }) => (
+    item?.visual?.match_kind === 'variant' && item?.visual?.geometry?.same_scene
+        ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-50 border border-slate-200 text-slate-500" title={`نسخة معدّلة من الصورة نفسها (تطابق هندسي: ${item.visual.geometry.inliers} نقطة)`}>نسخة معدّلة</span>
+        : null
+);
+
+const FETCH_FAILED_LABEL = 'لم يستطع Google قراءة الصورة من مضيفها — نتائج Lens ناقصة';
+export const fetchFailedEngines = (engines) => Object.entries(engines || {})
+    .filter(([, st]) => st && st.note === 'fetch_failed').map(([name]) => name);
+
 export const PlatformPill = ({ url }) => {
     const name = platformOf(url);
     if (!name) return null;
@@ -96,6 +120,8 @@ export const PlatformPill = ({ url }) => {
 export const parseOriginPayload = (payload) => (
     payload && payload.engine === 'origin_engine' ? {
         firstSeen: payload.first_seen || null,
+        firstSeenExact: payload.first_seen_exact || null,
+        versionNote: payload.version_note || null,
         narrative: payload.narrative || null,
         engines: payload.engines || {},
         stats: payload.stats || {},
@@ -256,6 +282,7 @@ export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = fal
                             <DatePill item={report.firstSeen} strong />
                             <PlatformPill url={report.firstSeen.url} />
                             <ProbablePill item={report.firstSeen} />
+                            <VariantPill item={report.firstSeen} />
                         </div>
                         <h3 className="font-bold text-slate-800 text-sm mb-1 line-clamp-2" dir="auto">{report.firstSeen.title}</h3>
                         <a href={report.firstSeen.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-slate-500 hover:text-slate-900 break-all line-clamp-1" dir="ltr">
@@ -277,6 +304,26 @@ export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = fal
                 </div>
             ) : (
                 <p className="text-sm text-slate-500">لم يُعثر على ظهور مؤرَّخ ومؤكد بصرياً — راجع الجدول الزمني أدناه.</p>
+            )}
+
+            {report.versionNote && (
+                <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">{report.versionNote}</p>
+            )}
+            {report.firstSeenExact && (
+                <a href={report.firstSeenExact.url} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-3 p-2.5 mt-2 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all">
+                    <Thumb item={report.firstSeenExact} size="w-12 h-12" />
+                    <div className="min-w-0">
+                        <p className="text-[10px] text-slate-400">أول ظهور لهذه النسخة بالذات</p>
+                        <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                            <DatePill item={report.firstSeenExact} />
+                            <PlatformPill url={report.firstSeenExact.url} />
+                        </div>
+                    </div>
+                </a>
+            )}
+            {fetchFailedEngines(report.engines).length > 0 && (
+                <p className="text-[11px] text-slate-500 mt-3">{FETCH_FAILED_LABEL}</p>
             )}
 
             {report.scenes?.length > 1 && (
@@ -303,7 +350,7 @@ export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = fal
             {Object.keys(report.engines || {}).length > 0 && (
                 <p className="text-[10px] text-slate-400 mt-4" dir="ltr">
                     {Object.entries(report.engines)
-                        .filter(([, st]) => st.ok && st.count > 0)
+                        .filter(([name, st]) => st.ok && st.count > 0 && ENGINE_LABELS[name.replace(/@.*$/, '')])
                         .map(([name, st]) => `${ENGINE_LABELS[name.replace(/@.*$/, '')] || name} ${st.count}`)
                         .join(' · ')}
                 </p>
@@ -411,6 +458,8 @@ export const TimelineCard = ({ report, timeline, cached = false, onRerun, error,
                                     <DatePill item={item} strong={isFirst} />
                                     <PlatformPill url={item.link} />
                                     {isFirst && <ProbablePill item={item} />}
+                                    <VariantPill item={item} />
+                                    <VerdictPill item={item} />
                                 </div>
                                 <p className="font-bold text-xs text-slate-800 mt-1 line-clamp-1" dir="auto">{item.title}</p>
                                 <p className="text-[10px] text-slate-400 break-all line-clamp-1" dir="ltr">{item.link}</p>
@@ -420,7 +469,7 @@ export const TimelineCard = ({ report, timeline, cached = false, onRerun, error,
                 })}
             </div>
         ) : (
-            !error && <div className="text-center text-slate-400 py-6 text-sm">لا يوجد سجل تاريخي.</div>
+            !error && <div className="text-center text-slate-400 py-6 text-sm">لا يوجد سجل تاريخي.{fetchFailedEngines(report?.engines).length > 0 && <span className="block text-[11px] mt-1">{FETCH_FAILED_LABEL}</span>}</div>
         )}
     </GlassCard>
     );
