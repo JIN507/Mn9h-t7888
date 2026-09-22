@@ -853,10 +853,13 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
     if first_seen:
         progress('حفظ نسخة أرشيفية من المصدر...')
         first_seen['archived'] = oe.wayback_provider.archive_url(first_seen['url'])
+    exact_fs, version_note = oe.exact_version_first_seen(inv.timeline, first_seen)
     payload = {
         'success': True,
         'engine': 'origin_engine',
         'first_seen': oe._public_item(first_seen) if first_seen else None,
+        'first_seen_exact': oe._public_item(exact_fs) if exact_fs else None,
+        'version_note': version_note,
         'forensics': forensics,
         'internal_sightings': internal,
         'earlier_hints': [oe._public_item(i) for i in oe.earlier_hints(inv.timeline, first_seen)],

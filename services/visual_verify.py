@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 PHASH_SAME_MAX_DISTANCE = 8
 SIM_CONFIRM = 0.90
 SIM_AMBIGUOUS = 0.75
+GEOM_MIN_SIM = 0.55      # run geometry on candidates at least this similar (or hash-close)
+GEOM_MAX_PHASH = 26
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 UA = {'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                      'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -54,10 +56,13 @@ def build_query_signature(image):
         logger.warning('Cannot open query image: %s', e)
         return None
 
+    from services import geometric_verify
     sig = {
         'phash': imagehash.phash(pil),
         'dhash': imagehash.dhash(pil),
         'embedding': embed_image(pil) if encoder_available() else None,
+        'geom': geometric_verify.features(pil),
+        'size': pil.size,
     }
     return sig
 
@@ -240,6 +245,8 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
     best_dist = None
     best_url = None
     best_blob = None
+    best_geom = None
+    from services import geometric_verify
 
     for img_url in candidates:
         try:
@@ -272,6 +279,7 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
                     out['matched_headers'] = dict(r.headers)
                 return out
 
+        sim = None
         if query_embeddings:
             cand_emb = embed_image(pil)
             sims = [x for x in (cosine_similarity(q, cand_emb) for q in query_embeddings)
@@ -282,9 +290,28 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
                 best_url = img_url
                 best_blob = (data, dict(r.headers), pil.size)
 
+        # Geometry decides the grey zone: a re-framed / restored / cropped
+        # copy confirms on keypoints, a look-alike scene does not.
+        worth_geometry = ((sim is not None and sim >= GEOM_MIN_SIM)
+                          or (sim is None and distance is not None and distance <= GEOM_MAX_PHASH))
+        if worth_geometry and not (best_geom or {}).get('same_scene'):
+            g = geometric_verify.same_scene(sigs, pil)
+            if g['same_scene'] or best_geom is None or g['inliers'] > best_geom['inliers']:
+                best_geom = dict(g, image_url=img_url)
+                if g['same_scene']:
+                    best_url = img_url
+                    best_blob = (data, dict(r.headers), pil.size)
+                    if sim is not None:
+                        best_sim = sim
+
     out['phash_distance'] = best_dist
-    if best_sim is not None:
-        out['similarity'] = round(best_sim, 4)
+    geom_ok = bool((best_geom or {}).get('same_scene'))
+    geom_no = (best_geom or {}).get('same_scene') is False
+    if best_geom is not None:
+        out['geometry'] = {k: best_geom.get(k) for k in ('inliers', 'good', 'ratio', 'same_scene')}
+    if best_sim is not None or geom_ok:
+        if best_sim is not None:
+            out['similarity'] = round(best_sim, 4)
         out['matched_image_url'] = best_url
         if best_blob is not None:
             out['matched_size'] = best_blob[2]
@@ -292,14 +319,21 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
             if keep_bytes:
                 out['matched_image_bytes'] = best_blob[0]
                 out['matched_headers'] = best_blob[1]
-        if best_sim >= SIM_CONFIRM:
+        if geom_ok:
             out.update(verdict='confirmed', match_kind='variant')
+        elif best_sim >= SIM_CONFIRM:
+            if geom_no:
+                out.update(verdict='ambiguous', match_kind=None,
+                           note='embedding agrees, geometry does not (look-alike scene?)')
+            else:
+                out.update(verdict='confirmed', match_kind='variant')
         elif best_sim >= SIM_AMBIGUOUS:
-            out['verdict'] = 'ambiguous'
+            out['verdict'] = 'rejected' if geom_no else 'ambiguous'
         else:
             out['verdict'] = 'rejected'
     else:
         # pHash didn't confirm and no encoder — don't silently drop results
+        # (a negative geometry alone is not enough to reject without an encoder)
         out['verdict'] = 'unverified'
     return out
 

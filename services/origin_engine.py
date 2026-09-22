@@ -531,6 +531,7 @@ def _score_thumb(pil, sigs, query_embeddings):
         emb = embed_image(pil)
         sims = [x for x in (cosine_similarity(q, emb) for q in query_embeddings) if x is not None]
         sim = max(sims) if sims else None
+    geom = None
     if (phash is not None and phash <= PRESCREEN_MATCH_PHASH) or \
             (sim is not None and sim >= PRESCREEN_MATCH_SIM):
         verdict = 'match'
@@ -539,8 +540,17 @@ def _score_thumb(pil, sigs, query_embeddings):
         verdict = 'reject'
     else:
         verdict = 'unknown'
-    return {'verdict': verdict, 'similarity': round(sim, 4) if sim is not None else None,
-            'phash_distance': phash}
+        # grey zone: keypoint geometry promotes re-framed / restored copies
+        if (sim is None or sim >= 0.55) and (phash is None or phash <= 30):
+            from services import geometric_verify
+            geom = geometric_verify.same_scene(sigs, pil)
+            if geom['same_scene']:
+                verdict = 'match'
+    out = {'verdict': verdict, 'similarity': round(sim, 4) if sim is not None else None,
+           'phash_distance': phash}
+    if geom is not None:
+        out['geometry'] = {'inliers': geom['inliers'], 'same_scene': geom['same_scene']}
+    return out
 
 
 def prescreen_candidates(cands, query_sig, progress=None, *, limit=PRESCREEN_MAX):
@@ -768,10 +778,11 @@ def inspect_candidate(cand, query_sig, *, use_wayback=True, strict=False):
     matched_from = visual.pop('matched_from', 'page')
     out['visual'] = {k: visual.get(k) for k in
                      ('verdict', 'match_kind', 'similarity', 'phash_distance',
-                      'matched_image_url')}
+                      'matched_image_url', 'geometry', 'note')}
     out['visual']['matched_from'] = matched_from
+    geometry_confirmed = bool((visual.get('geometry') or {}).get('same_scene'))
     if (out['visual']['verdict'] == 'confirmed' and out['visual']['match_kind'] == 'variant'
-            and matched_from == 'engine'
+            and matched_from == 'engine' and not geometry_confirmed
             and (out['visual']['phash_distance'] is None
                  or out['visual']['phash_distance'] > THUMB_VARIANT_MAX_PHASH)):
         out['visual']['verdict'] = 'ambiguous'
@@ -1317,10 +1328,13 @@ def investigate_origin(image_url, *, progress=None, budget=None,
     }
     if first_seen:
         first_seen['archived'] = wayback_provider.archive_url(first_seen['url'])
+    exact_fs, version_note = exact_version_first_seen(timeline, first_seen)
     payload = {
         'success': True,
         'engine': 'origin_engine',
         'first_seen': _public_item(first_seen) if first_seen else None,
+        'first_seen_exact': _public_item(exact_fs) if exact_fs else None,
+        'version_note': version_note,
         'earlier_hints': [_public_item(i) for i in earlier_hints(timeline, first_seen)],
         'scenes': ([{'frame': f, 'first_seen': _public_item(i)}
                     for f, i in sorted(earliest_by_frame(timeline).items())]
@@ -1401,6 +1415,8 @@ def to_search_payload(report):
         'timeline': timeline,
         'total': len(timeline),
         'first_seen': report.get('first_seen'),
+        'first_seen_exact': report.get('first_seen_exact'),
+        'version_note': report.get('version_note'),
         'narrative': report.get('narrative'),
         'engines': report.get('engines') or {},
         'stats': report.get('stats') or {},
@@ -1414,6 +1430,27 @@ def to_search_payload(report):
         'internal_sightings': report.get('internal_sightings') or [],
         'raw': {},
     }
+
+
+def exact_version_first_seen(timeline, first_seen):
+    """The query may be a derivative (AI-restored, cropped, recoloured) of an
+    older photo. first_seen is the origin of the PHOTOGRAPH; this is the
+    earliest sighting of THIS EXACT version (hash-identical), when it
+    differs. Returns (item|None, note|None)."""
+    if not first_seen:
+        return None, None
+    fs_visual = first_seen.get('visual') or {}
+    if fs_visual.get('match_kind') == 'exact':
+        return None, None
+    exact = sorted([i for i in timeline if _eligible_first(i)
+                    and (i.get('visual') or {}).get('match_kind') == 'exact'], key=_first_seen_key)
+    note = None
+    if (fs_visual.get('geometry') or {}).get('same_scene'):
+        note = ('الصورة المرفوعة نسخة معدّلة من الصورة الأصلية (اقتصاص أو تحسين/توسيع بالذكاء '
+                'الاصطناعي أو إعادة تلوين)؛ أول الظهور أعلاه هو أصل الصورة نفسها.')
+    if exact and exact[0].get('url') != first_seen.get('url'):
+        return exact[0], note
+    return None, note
 
 
 def _has_embedding(query_sig):
