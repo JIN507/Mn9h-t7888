@@ -101,13 +101,31 @@ def parse_iso_datetime(value):
         return None
 
 
+def manual_search_image_url(image_url):
+    """The address the manual engine links carry. A presigned R2 link has
+    its own query string (breaks when pasted raw into another URL) and dies
+    in 15 minutes; prefer the app's plain public route (production), else a
+    24-hour presigned link."""
+    try:
+        from providers import storage
+        key = storage.key_from_presigned_url(image_url)
+        if key:
+            return storage.public_media_url(key) or storage.presigned_get_url(key, expires=86400) or image_url
+    except Exception as e:
+        logger.debug('manual link url fallback: %s', e)
+    return image_url
+
+
 def search_images(image_url):
-    """Generate manual search URLs for reverse image search engines."""
+    """Manual reverse-image links (Google Lens, Bing, Yandex, TinEye). The
+    image address is percent-encoded so the engines receive it intact."""
+    from urllib.parse import quote
+    target = quote(manual_search_image_url(image_url), safe='')
     return {
-        'google': f"https://lens.google.com/uploadbyurl?url={image_url}",
-        'bing': f"https://www.bing.com/images/search?q=imgurl:{image_url}&view=detailv2&iss=sbi",
-        'yandex': f"https://yandex.com/images/search?rpt=imageview&url={image_url}",
-        'tineye': f"https://tineye.com/search?url={image_url}"
+        'google': f"https://lens.google.com/uploadbyurl?url={target}",
+        'bing': f"https://www.bing.com/images/search?q=imgurl:{target}&view=detailv2&iss=sbi",
+        'yandex': f"https://yandex.com/images/search?rpt=imageview&url={target}",
+        'tineye': f"https://tineye.com/search?url={target}",
     }
 
 

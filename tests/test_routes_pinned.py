@@ -224,7 +224,8 @@ def test_upload_returns_engine_links(client, png_bytes):
     assert r.status_code == 200
     assert d['imageUrl'] == HOSTED_IMG
     assert set(d['searchResults'].keys()) == {'google', 'bing', 'yandex', 'tineye'}
-    assert HOSTED_IMG in d['searchResults']['google']
+    from urllib.parse import quote
+    assert quote(HOSTED_IMG, safe='') in d['searchResults']['google']
 
 
 @responses.activate
@@ -403,3 +404,20 @@ def test_upload_rejects_non_image_bytes(client):
                     content_type='multipart/form-data')
     assert r.status_code == 400
     assert r.get_json()['success'] is False
+
+
+def test_manual_engine_links_are_encoded(monkeypatch):
+    """Presigned R2 links carry their own '?' and '&': the manual engine
+    links must percent-encode them (and prefer a plain public URL)."""
+    from services import search_service
+    from providers import storage
+    presigned = 'https://acct.r2.cloudflarestorage.com/b/uploads/a.jpg?X-Amz-Signature=abc&X-Amz-Expires=900'
+    monkeypatch.setattr(storage, 'public_media_url', lambda key: None)
+    monkeypatch.setattr(storage, 'presigned_get_url', lambda key, expires=None: f'https://r2.example/{key}?sig=long&exp={expires}')
+    links = search_images = search_service.search_images(presigned)
+    for url in links.values():
+        assert '&exp=86400' not in url and 'exp%3D86400' in url        # inner params encoded
+        assert url.count('?') == 1
+    assert links['google'].startswith('https://lens.google.com/uploadbyurl?url=https%3A%2F%2Fr2.example%2Fuploads%2Fa.jpg')
+    monkeypatch.setattr(storage, 'public_media_url', lambda key: f'https://tahaqqaq.onrender.com/api/media/t/{key}')
+    assert 'tahaqqaq.onrender.com%2Fapi%2Fmedia' in search_service.search_images(presigned)['yandex']
