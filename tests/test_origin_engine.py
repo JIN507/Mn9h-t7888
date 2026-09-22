@@ -397,6 +397,8 @@ def test_investigate_origin_finds_first_seen_and_expands(fake_world):
 
 
 def test_search_copy_url_uses_expiring_imgbb_for_presigned_links(monkeypatch):
+    monkeypatch.delenv('R2_PUBLIC_BASE_URL', raising=False)   # the dev .env now sets it
+    monkeypatch.delenv('PUBLIC_BASE_URL', raising=False)
     calls = []
     import providers.imgbb as imgbb
     monkeypatch.setattr(imgbb, 'upload_to_imgbb',

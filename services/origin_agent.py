@@ -119,10 +119,16 @@ SYSTEM_PROMPT = (
     'the earliest dated post from the account that filmed it. Use '
     'youtube_search with a description in the audience\'s language.\n'
     '9. FILE FORENSICS in the image analysis (credit lines, creator, camera, '
-    'software, C2PA, AI-detector verdict) are strong leads: a credit line '
-    'names the publisher — web_search it. If the image is likely '
-    'AI-generated, say so in finish: there is no real-world origin, the '
-    'earliest poster is the creator.'
+    'software, C2PA) are strong leads: a credit line names the publisher — '
+    'web_search it. The AI-detector verdict is a WEAK signal: detectors '
+    'routinely flag old, re-compressed or resized real photos as AI. It '
+    'must never shorten the investigation — search exactly as hard as for '
+    'any photo; mention the verdict in finish only if no sighting exists.\n'
+    '10. Engines reporting note "fetch_failed" did NOT see the image (their '
+    'host refused it): that is missing evidence, not a zero. '
+    'lens_visual_titles / other engines\' page titles often name the people, '
+    'place or event: use those names in web_search (Arabic and English) — '
+    'named text search finds the original post more often than any engine.'
 )
 
 TOOLS = [
@@ -253,6 +259,7 @@ class Investigation:
 
     def __init__(self, image_url, query_sig, progress, budget):
         self.image_url = image_url
+        self.alternates = ()         # other public URLs of the query image
         self.image_bytes = None
         self.extra_frames = []
         self.query_sig = query_sig
@@ -387,7 +394,7 @@ def tool_reverse_search(inv, engine, image_url=None):
             statuses['bing_web'] = {'ok': False, 'count': 0, 'note': str(e)[:120]}
         names = ()
     for name in names:
-        got, st = oe.harvest_engine(name, target)
+        got, st = oe.harvest_engine(name, target, alternates=() if pivot else inv.alternates)
         statuses[name] = st
         key = f'{name}@pivot' if pivot else name
         inv.engines_status[key] = dict(st, **({'pivot_image': pivot} if pivot else {}))
@@ -425,35 +432,52 @@ def tool_inspect_pages(inv, urls):
     return {'inspected': [inv.item_brief(i) for i in items] + already}
 
 
+AUTO_INSPECT_LEADS = 6
+
+
+def _inspect_leads(inv, leads, provider):
+    """Leads from text/Grok search are pages, not evidence — but an analyst
+    would open the social posts and dated articles at once. Do that here
+    (social posts first, bounded) instead of waiting for the model."""
+    raw = [{'link': l['url'], 'title': l.get('title', ''), 'match_type': 'organic',
+            'provider': provider, 'thumbnail': None}
+           for l in leads if not l.get('already_inspected')]
+    new = inv.add_candidates(raw, round_no=len(inv.steps) + 1)
+    new = [c for c in new if not oe.is_listing_url(c['url'])]
+    new.sort(key=lambda c: 0 if oe.is_social(c['url']) else 1)
+    chosen = new[:AUTO_INSPECT_LEADS]
+    if not chosen:
+        return []
+    inv.progress(f'الوكيل: فحص {len(chosen)} صفحة من نتائج البحث')
+    return [inv.item_brief(i) for i in inv.inspect(chosen)]
+
+
 def tool_web_search(inv, query, lang='auto'):
-    if not os.environ.get('ZENSERP_API_KEY'):
+    if not (os.environ.get('SERPAPI_API_KEY') or os.environ.get('ZENSERP_API_KEY')):
         return {'error': 'text search not configured'}
-    from providers.zenserp import text_search
     if lang == 'auto':
         lang = 'ar' if _ARABIC.search(query or '') else 'en'
     gl, hl = ('sa', 'ar') if lang == 'ar' else ('us', 'en')
     inv.progress(f'الوكيل: بحث نصي «{query[:40]}»')
     try:
-        resp = text_search(query, num=10, gl=gl, hl=hl)
-        if resp.status_code != 200:
-            return {'error': f'search HTTP {resp.status_code}'}
-        data = resp.json()
+        items = oe.text_search_results(query, hl=hl, gl=gl, num=10)
     except Exception as e:
         return {'error': f'search failed: {e}'}
-    items = [i for i in (data.get('organic') or [])[:10]
-             if i.get('url') or i.get('link')]
-    resolved = resolve_redirects([i.get('url') or i.get('link') for i in items])
+    resolved = resolve_redirects([i['link'] for i in items])
     leads = []
     for item, link in zip(items, resolved):
         if not link or oe.is_junk(link):
             continue
         canon = oe.canonical_url(link)
         leads.append({'url': link, 'title': (item.get('title') or '')[:90],
-                      'snippet': (item.get('description') or '')[:160],
+                      'snippet': (item.get('snippet') or '')[:160],
+                      'date_hint': item.get('date'),
                       'social_post': oe.is_social(link),
                       'already_inspected': bool(canon and canon in inv.by_canonical)})
-    return {'query': query, 'leads': leads,
-            'note': 'Leads are not evidence. inspect_pages the promising ones.'}
+    inspected = _inspect_leads(inv, leads, 'web_search')
+    return {'query': query, 'leads': leads, 'inspected': inspected,
+            'note': 'Leads are not evidence; the social posts / articles above were '
+                    'inspected already — inspect_pages the rest if promising.'}
 
 
 def tool_grok_search(inv, question):
@@ -476,8 +500,10 @@ def tool_grok_search(inv, question):
         leads.append({'url': u, 'social_post': oe.is_social(u),
                       'already_inspected': bool(canon and canon in inv.by_canonical)})
     inv.engines_status['grok'] = {'ok': True, 'count': len(leads)}
-    return {'answer': res['text'][:2500], 'leads': leads,
-            'note': 'Leads are not evidence. inspect_pages the promising ones.'}
+    inspected = _inspect_leads(inv, leads, 'grok')
+    return {'answer': res['text'][:2500], 'leads': leads, 'inspected': inspected,
+            'note': 'Leads are not evidence; the social posts / articles above were '
+                    'inspected already — inspect_pages the rest if promising.'}
 
 
 def tool_youtube_search(inv, query, before_date=None, lang=None):
@@ -541,13 +567,14 @@ def _summ(tool, args, result):
     if tool == 'web_search':
         if result.get('error'):
             return f"«{args.get('query', '')[:50]}» → خطأ: {result['error']}"
-        return f"«{args.get('query', '')[:50]}» → {len(result.get('leads', []))} نتيجة"
+        return (f"«{args.get('query', '')[:50]}» → {len(result.get('leads', []))} نتيجة، "
+                f"فُحص {len(result.get('inspected', []))}")
     if tool == 'read_page':
         return f"{oe.domain_of(args.get('url', ''))}: {result.get('visual')} / {result.get('date')}"
     if tool == 'grok_search':
         if result.get('error'):
             return f"Grok: {result['error'][:60]}"
-        return f"Grok → {len(result.get('leads', []))} رابطاً"
+        return f"Grok → {len(result.get('leads', []))} رابطاً، فُحص {len(result.get('inspected', []))}"
     if tool == 'youtube_search':
         if result.get('error'):
             return f"YouTube: {result['error'][:60]}"
@@ -668,7 +695,7 @@ def _narrative(inv, image_context, first_seen, finish):
     file_hints = (image_context or {}).get('file_forensics') or []
     user = ('وصف الصورة: ' + json.dumps((image_context or {}).get('description', ''), ensure_ascii=False)
             + ('\nبيانات الملف: ' + '; '.join(file_hints) if file_hints else '')
-            + ('\nتنبيه: الصورة على الأرجح مولّدة بالذكاء الاصطناعي — لا يوجد حدث حقيقي، أول ناشر هو منشئها.'
+            + ('\nملاحظة: كاشف الذكاء الاصطناعي رجّح أن الملف مولّد، وهو كثيراً ما يخطئ مع الصور القديمة أو المضغوطة؛ لا تبنِ عليه حكماً إن وُجدت ظهورات حقيقية.'
                if (image_context or {}).get('likely_ai_generated') else '')
             + ('\nفيديو من عدة مشاهد — أول ظهور لكل إطار: ' + scene_lines if scenes else '')
             + '\nأول ظهور مؤكد: ' + (f"{first_seen['published_at']} على {first_seen['domain']} ({first_seen['url']})" if first_seen else 'لا يوجد')
@@ -763,17 +790,30 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
     # round 0: the deterministic harvest gives the model evidence to reason from
     progress('جاري البحث في المحركات (Lens, Yandex, TinEye)...')
     raw = oe._harvest(search_url, progress, inv.engines_status,
-                      extra_frame_urls=extra_frame_urls)
+                      extra_frame_urls=extra_frame_urls, alternates=inv.alternates)
     cands = inv.add_candidates(raw, round_no=0)
     # A Lens locale that timed out is a hole in the net (the Arabic locale
     # often carries the most for Arabic content): give it one more pass.
     for name in ('lens_exact_en', 'lens_exact_ar'):
         if (inv.engines_status.get(name) or {}).get('note') == 'timeout':
             progress(f'إعادة محاولة {name} بعد انتهاء المهلة...')
-            got, st = oe.harvest_engine(name, search_url)
+            got, st = oe.harvest_engine(name, search_url, alternates=inv.alternates)
             inv.engines_status[name] = dict(st, retried=True)
             if got:
                 cands += inv.add_candidates(got, round_no=0)
+    if isinstance(image_context, dict):
+        # Page titles of the Lens "similar" matches name the people / place /
+        # event far more reliably than the vision model does — text leads.
+        titles = []
+        for c in cands:
+            t = (c.get('title') or '').strip()
+            if t and 'google_lens' in (c.get('providers') or []) and t not in titles:
+                titles.append(t[:100])
+        if titles:
+            image_context['lens_visual_titles'] = titles[:14]
+        failed = [n for n, st in inv.engines_status.items() if (st or {}).get('note') == 'fetch_failed']
+        if failed:
+            image_context['engines_that_could_not_fetch_the_image'] = failed
     n_frames = 1 + len(extra_frame_urls)
     matches, rejects, _ = oe.prescreen_candidates(cands, query_sig, progress)
     inv.engines_status['prescreen'] = {'ok': True, 'count': matches,

@@ -13,6 +13,23 @@ from .base import BaseProvider, Candidate
 logger = logging.getLogger(__name__)
 
 SEARCH_URL = 'https://serpapi.com/search.json'
+NO_RESULTS_MARK = "hasn't returned any results"
+
+
+class SerpApiNoResults(requests.RequestException):
+    """SerpAPI answered HTTP 200 with `{"error": "... hasn't returned any
+    results for this query."}`. Live finding (2026-09-22): this is the SAME
+    text Google returns for a URL it could not fetch (a 404 image, a host
+    it refuses such as *.r2.dev / r2.cloudflarestorage.com). For
+    `visual_matches` it practically always means "image not fetched";
+    for `exact_matches` it may also be a genuine empty. Either way it is
+    not a normal empty list, so callers can retry with another copy of the
+    image and report it honestly."""
+
+
+def _no_results(data):
+    err = data.get('error') if isinstance(data, dict) else None
+    return isinstance(err, str) and NO_RESULTS_MARK in err
 
 
 class SerpApiProvider(BaseProvider):
@@ -44,6 +61,8 @@ def reverse_image_pages(image_url, hl='en', country='us'):
         raise requests.RequestException(
             f'SerpAPI HTTP {resp.status_code}: {resp.text[:200]}')
     data = resp.json()
+    if _no_results(data):
+        raise SerpApiNoResults(f'google_reverse_image: {data.get("error")}')
     out = []
     for item in data.get('image_results') or []:
         if not isinstance(item, dict):
@@ -87,6 +106,8 @@ def lens_matches(image_url, lens_type, hl='ar', country='sa', no_cache=False):
             f'SerpAPI HTTP {resp.status_code}: {resp.text[:200]}')
 
     data = resp.json()
+    if _no_results(data):
+        raise SerpApiNoResults(f'google_lens {lens_type}: {data.get("error")}')
     matches = []
     for key, match_type in (('exact_matches', 'exact'),
                             ('visual_matches', 'similar')):
@@ -110,6 +131,33 @@ def lens_matches(image_url, lens_type, hl='ar', country='sa', no_cache=False):
                 match['image_url'] = item['image']
             matches.append(match)
     return matches
+
+
+def web_search(query, hl='en', gl='us', num=10):
+    """Google TEXT search (`engine=google`) — the agent's web_search tool.
+    Harvests `organic_results`, which is correct for a text query (hard
+    rule #5 concerns image matches only). Returns [{link,title,snippet,date}]."""
+    params = {
+        'engine': 'google',
+        'q': query,
+        'api_key': os.environ.get('SERPAPI_API_KEY'),
+        'hl': hl,
+        'gl': gl,
+        'num': num,
+    }
+    resp = _provider.request('GET', SEARCH_URL, params=params, timeout=(8, 30))
+    if resp.status_code != 200:
+        raise requests.RequestException(
+            f'SerpAPI HTTP {resp.status_code}: {resp.text[:200]}')
+    data = resp.json()
+    out = []
+    for item in data.get('organic_results') or []:
+        if not isinstance(item, dict) or not item.get('link'):
+            continue
+        out.append({'link': item['link'], 'title': item.get('title') or '',
+                    'snippet': item.get('snippet') or '', 'date': item.get('date')})
+    logger.info('serpapi google text search returned %d results', len(out))
+    return out
 
 
 # Legacy alias kept for the pinned test suite / transitional callers

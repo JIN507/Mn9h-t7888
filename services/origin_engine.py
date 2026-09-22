@@ -151,27 +151,109 @@ INSPECT_TIMEOUT_S = 90     # per inspection batch
 LENS_RETRY_DELAY_S = float(os.environ.get('LENS_RETRY_DELAY_S', '2'))
 
 
-def _lens_exact_with_retry(image_url, hl, country):
+# Hosts Google's Lens fetcher refuses (live finding 2026-09-22: every
+# Cloudflare R2 link — presigned or public r2.dev — came back "hasn't
+# returned any results", the exact text a 404 URL gets, while the same
+# photo on any ordinary host returned dozens of matches; Yandex accepts
+# r2.dev fine). Google engines therefore get the image through an image
+# CDN proxy first when it lives on one of these hosts.
+GOOGLE_REFUSED_HOSTS = tuple(h.strip().lower() for h in os.environ.get(
+    'GOOGLE_REFUSED_HOSTS', 'r2.dev,r2.cloudflarestorage.com').split(',') if h.strip())
+LENS_IMAGE_PROXY = os.environ.get('LENS_IMAGE_PROXY', 'wsrv')
+_PROXY_TEMPLATES = {'wsrv': 'https://wsrv.nl/?url={url}&output=jpg&filename=q.jpg'}
+
+
+def _host_refused_by_google(url):
+    try:
+        host = urlparse(url).netloc.lower()
+    except Exception:
+        return False
+    return any(host == h or host.endswith('.' + h) for h in GOOGLE_REFUSED_HOSTS)
+
+
+def proxied_image_url(url):
+    """The same public image through an image CDN proxy (a host Google
+    fetches from), or None when the proxy is disabled."""
+    if not url or LENS_IMAGE_PROXY.lower() == 'none':
+        return None
+    template = _PROXY_TEMPLATES.get(LENS_IMAGE_PROXY.lower(), LENS_IMAGE_PROXY)
+    if '{url}' not in template:
+        return None
+    from urllib.parse import quote
+    return template.format(url=quote(url.split('://', 1)[-1], safe='/:?=&%'))
+
+
+def google_image_urls(image_url, alternates=()):
+    """Ordered URL variants for the Google engines (Lens, reverse image):
+    proxy first when the image sits on a host Google refuses, the direct
+    link otherwise; every other variant follows as a fallback."""
+    out = []
+    proxied = proxied_image_url(image_url) if not urlparse(image_url).query else None
+    if _host_refused_by_google(image_url) and proxied:
+        out.append(proxied)
+    out.append(image_url)
+    if proxied and proxied not in out:
+        out.append(proxied)
+    for u in alternates or ():
+        if u and u not in out:
+            out.append(u)
+    return out
+
+
+def _lens_exact_with_retry(image_url, hl, country, alternates=()):
     """Lens exact matches are the backbone of the harvest; SerpAPI has
-    transient blips (connection resets, empty 200s that it then caches).
-    Retry twice, bypassing SerpAPI's cache on the retries."""
-    last_error = None
-    for attempt in range(LENS_EXACT_RETRIES + 1):
+    transient blips (connection resets, empty 200s that it then caches)
+    and Google refuses some image hosts outright. Retries bypass SerpAPI's
+    cache; a "no results" answer (= image not fetched) moves on to the
+    next URL variant of the same image. When every attempt was such an
+    answer the SerpApiNoResults propagates so the engine is reported as a
+    fetch failure, not as a clean zero."""
+    from providers.serpapi import SerpApiNoResults
+    urls = [image_url] + [u for u in (alternates or ()) if u and u != image_url]
+    max_attempts = LENS_EXACT_RETRIES + 1     # +1 per host switch below
+    idx, attempts = 0, 0
+    last_error, all_no_results = None, True
+    while attempts < max_attempts:
+        url = urls[idx]
         try:
-            got = lens_matches(image_url, 'exact_matches', hl=hl, country=country,
-                               no_cache=attempt > 0)
+            got = lens_matches(url, 'exact_matches', hl=hl, country=country,
+                               no_cache=attempts > 0)
             if got:
                 return got
-            logger.info('lens exact %s/%s empty (attempt %d)', hl, country, attempt + 1)
+            all_no_results = False
+            logger.info('lens exact %s/%s empty (attempt %d)', hl, country, attempts + 1)
+        except SerpApiNoResults as e:
+            last_error = e
+            logger.info('lens exact %s/%s: not fetched / no results (attempt %d, %s)',
+                        hl, country, attempts + 1, domain_of(url))
+            if idx + 1 < len(urls):
+                idx += 1                      # another host for the same image
+                max_attempts += 1
         except Exception as e:
             last_error = e
+            all_no_results = False
             logger.info('lens exact %s/%s failed (attempt %d): %s', hl, country,
-                        attempt + 1, e)
-        if attempt < LENS_EXACT_RETRIES:
-            time.sleep(LENS_RETRY_DELAY_S * (attempt + 1))
-    if last_error is not None:
+                        attempts + 1, e)
+        attempts += 1
+        if attempts < max_attempts:
+            time.sleep(LENS_RETRY_DELAY_S * attempts)
+    if last_error is not None and (all_no_results or not isinstance(last_error, SerpApiNoResults)):
         raise last_error
     return []
+
+
+def _google_with_fallback(fn, image_url, alternates=()):
+    """Run a Google engine over the URL variants; a SerpApiNoResults on
+    one variant tries the next (uncached)."""
+    from providers.serpapi import SerpApiNoResults
+    urls = [image_url] + [u for u in (alternates or ()) if u and u != image_url]
+    last = None
+    for i, u in enumerate(urls):
+        try:
+            return fn(u, i > 0)
+        except SerpApiNoResults as e:
+            last = e
+    raise last
 
 
 def _browser_engine(name):
@@ -208,7 +290,7 @@ def search_copy_url(image_bytes, image_url):
     ('not publicly accessible') and are flaky with Lens; an expiring ImgBB
     copy is accepted everywhere. The image is being sent to those engines
     anyway, so the copy adds no exposure. Falls back to image_url."""
-    if not image_bytes or os.environ.get('SEARCH_COPY', 'imgbb').lower() == 'none':
+    if os.environ.get('SEARCH_COPY', 'imgbb').lower() == 'none':
         return image_url
     try:
         parsed = urlparse(image_url)
@@ -234,6 +316,8 @@ def search_copy_url(image_bytes, image_url):
     except Exception as e:
         logger.debug('public media url unavailable: %s', e)
     # Option B: an expiring ImgBB copy.
+    if not image_bytes:
+        return image_url
     if not os.environ.get('IMGBB_API_KEY'):
         logger.warning('search copy: no R2_PUBLIC_BASE_URL and no IMGBB_API_KEY — '
                        'engines get the presigned link (Yandex will reject it)')
@@ -249,21 +333,27 @@ def search_copy_url(image_bytes, image_url):
     return image_url
 
 
-def engine_table(image_url, *, include_visual=True):
+def engine_table(image_url, *, include_visual=True, alternates=()):
     """name -> zero-arg callable for every engine that is configured.
-    Also returns {name: note} for engines that are NOT available."""
+    Also returns {name: note} for engines that are NOT available.
+    Google engines receive the Google-friendly URL variants (see
+    google_image_urls); the others get the plain public link."""
+    g = google_image_urls(image_url, alternates)
+    g_url, g_alt = g[0], tuple(g[1:])
     tasks = {
-        'lens_exact_en': lambda: _lens_exact_with_retry(image_url, 'en', 'us'),
-        'lens_exact_ar': lambda: _lens_exact_with_retry(image_url, 'ar', 'sa'),
+        'lens_exact_en': lambda: _lens_exact_with_retry(g_url, 'en', 'us', g_alt),
+        'lens_exact_ar': lambda: _lens_exact_with_retry(g_url, 'ar', 'sa', g_alt),
         'vision': lambda: vision_web_detection(image_url),
         'tineye': lambda: tineye_provider.search_by_url(image_url),
         'yandex': lambda: yandex_provider.reverse_image(image_url),
     }
     if include_visual:
-        tasks['lens_visual'] = lambda: lens_matches(
-            image_url, 'visual_matches', hl='en', country='us')
+        tasks['lens_visual'] = lambda: _google_with_fallback(
+            lambda u, nc: lens_matches(u, 'visual_matches', hl='en', country='us', no_cache=nc),
+            g_url, g_alt)
     if os.environ.get('GOOGLE_REVERSE_IMAGE', 'true').lower() != 'false':
-        tasks['google_reverse'] = lambda: reverse_image_pages(image_url, hl='en', country='us')
+        tasks['google_reverse'] = lambda: _google_with_fallback(
+            lambda u, nc: reverse_image_pages(u, hl='en', country='us'), g_url, g_alt)
     unavailable = {}
     if not tineye_provider.configured():
         tasks.pop('tineye')
@@ -287,9 +377,19 @@ ENGINE_NAMES = ('lens_exact_en', 'lens_exact_ar', 'lens_visual', 'yandex',
                 'tineye', 'tineye_web', 'vision', 'bing_web', 'google_reverse')
 
 
-def harvest_engine(name, image_url):
+def _failure_status(e):
+    """Engine status for an exception — a Google "no results" answer is
+    reported as a fetch failure, never as a clean zero."""
+    from providers.serpapi import SerpApiNoResults
+    if isinstance(e, SerpApiNoResults):
+        return {'ok': False, 'count': 0, 'note': 'fetch_failed',
+                'detail': 'Google did not fetch the image (host refused) or has no results'}
+    return {'ok': False, 'count': 0, 'note': str(e)[:120]}
+
+
+def harvest_engine(name, image_url, alternates=()):
     """Run ONE engine (agent tool). Returns (matches, status_dict)."""
-    tasks, unavailable = engine_table(image_url)
+    tasks, unavailable = engine_table(image_url, alternates=alternates)
     if name not in tasks:
         note = (unavailable.get(name) or unavailable.get(name.replace('_web', ''))
                 or ('not configured' if name in ENGINE_NAMES else 'unknown engine'))
@@ -299,7 +399,7 @@ def harvest_engine(name, image_url):
         return got, {'ok': True, 'count': len(got)}
     except Exception as e:
         logger.warning('engine %s failed: %s', name, e)
-        return [], {'ok': False, 'count': 0, 'note': str(e)[:120]}
+        return [], _failure_status(e)
 
 
 MAX_EXTRA_FRAMES = 7          # extra frames that get their own Lens search (a clip's scenes differ)
@@ -310,16 +410,19 @@ VIDEO_CONSENSUS_WINDOW_DAYS = 3  # ... within this window => probable match
 
 
 def _harvest(image_url, progress, engines_status, *, include_visual=True,
-             extra_frame_urls=None):
+             extra_frame_urls=None, alternates=()):
     """Run every candidate generator in parallel. Returns raw match dicts.
     extra_frame_urls (video mode): more frames of the same clip, each gets
-    a Lens exact search of its own — pages often show a different moment."""
-    tasks, unavailable = engine_table(image_url, include_visual=include_visual)
+    a Lens exact search of its own — pages often show a different moment.
+    alternates: other public URLs of the same query image (fallbacks)."""
+    tasks, unavailable = engine_table(image_url, include_visual=include_visual,
+                                      alternates=alternates)
     for name, note in unavailable.items():
         engines_status[name] = {'ok': False, 'count': 0, 'note': note}
     for n, frame in enumerate((extra_frame_urls or [])[:MAX_EXTRA_FRAMES], start=2):
+        fg = google_image_urls(search_copy_url(None, frame))
         tasks[f'lens_exact_en@frame{n}'] = (
-            lambda f=frame: _tag_frame(_lens_exact_with_retry(f, 'en', 'us'), n))
+            lambda f=fg[0], alt=tuple(fg[1:]): _tag_frame(_lens_exact_with_retry(f, 'en', 'us', alt), n))
 
     matches = []
     # No context manager: a straggling engine must not block the run
@@ -336,8 +439,8 @@ def _harvest(image_url, progress, engines_status, *, include_visual=True,
                 progress(f'{name}: {len(got)} نتيجة')
             except Exception as e:  # provider failures never stop the run
                 logger.warning('engine %s failed: %s', name, e)
-                engines_status[name] = {'ok': False, 'count': 0,
-                                        'note': str(e)[:120]}
+                engines_status[name] = _failure_status(e)
+                progress(f'{name}: ' + ('لم يستطع Google قراءة الصورة' if engines_status[name]['note'] == 'fetch_failed' else 'فشل'))
     except concurrent.futures.TimeoutError:
         for fut, name in futures.items():
             if not fut.done():
@@ -946,7 +1049,8 @@ def _llm_text_pivot(timeline, first_seen, seen, progress, engines_status,
                     budget, llm_calls):
     """DeepSeek reads captions/credits -> text queries -> Zenserp SERP.
     Only visually CONFIRMED pages may enter from this path."""
-    if not deepseek.configured() or not os.environ.get('ZENSERP_API_KEY'):
+    if not deepseek.configured() or not (os.environ.get('SERPAPI_API_KEY')
+                                         or os.environ.get('ZENSERP_API_KEY')):
         return [], llm_calls, None
     if llm_calls >= budget['max_llm_calls']:
         return [], llm_calls, None
@@ -973,24 +1077,47 @@ def _llm_text_pivot(timeline, first_seen, seen, progress, engines_status,
     if not queries:
         return [], llm_calls, plan
 
-    from providers.zenserp import text_search
     raw = []
     for q in queries:
         try:
-            resp = text_search(q, num=10, gl='us', hl='en')
-            if resp.status_code != 200:
-                continue
-            data = resp.json()
-            for item in (data.get('organic') or [])[:10]:
-                link = item.get('url') or item.get('link')
-                if link:
-                    raw.append({'link': link, 'title': item.get('title', ''),
-                                'match_type': 'organic', 'provider': 'text_pivot',
-                                'thumbnail': None})
+            for item in text_search_results(q, hl='en', gl='us', num=10):
+                raw.append({'link': item['link'], 'title': item.get('title', ''),
+                            'match_type': 'organic', 'provider': 'text_pivot',
+                            'thumbnail': None})
         except Exception as e:
             logger.info('text pivot query failed: %s', e)
     engines_status['text_pivot'] = {'ok': True, 'count': len(raw), 'queries': queries}
     return merge_candidates(raw, seen), llm_calls, plan
+
+
+def text_search_results(query, *, hl='en', gl='us', num=10):
+    """Web text search for the engine and the agent: SerpAPI Google first
+    (same key as Lens), Zenserp as the fallback (its free quota ran out
+    2026-09-22 — 403 "Not enough requests"). Returns [{link,title,snippet}].
+    Raises when no provider answered."""
+    errors = []
+    if os.environ.get('SERPAPI_API_KEY'):
+        try:
+            from providers.serpapi import web_search
+            return web_search(query, hl=hl, gl=gl, num=num)
+        except Exception as e:
+            errors.append(f'serpapi: {e}')
+    if os.environ.get('ZENSERP_API_KEY'):
+        try:
+            from providers.zenserp import text_search
+            resp = text_search(query, num=num, gl=gl, hl=hl)
+            if resp.status_code != 200:
+                raise RuntimeError(f'HTTP {resp.status_code}')
+            out = []
+            for item in (resp.json().get('organic') or [])[:num]:
+                link = item.get('url') or item.get('link')
+                if link:
+                    out.append({'link': link, 'title': item.get('title') or '',
+                                'snippet': item.get('description') or '', 'date': None})
+            return out
+        except Exception as e:
+            errors.append(f'zenserp: {e}')
+    raise RuntimeError('; '.join(errors) or 'text search not configured')
 
 
 # ------------------------------------------------------------------- report
@@ -1104,6 +1231,9 @@ def investigate_origin(image_url, *, progress=None, budget=None,
     from services import file_forensics
     forensics = file_forensics.analyze(image_bytes)
     internal = internal_sightings(query_sig)
+    if forensics.get('likely_ai'):
+        engines_status['ai_detector'] = {'ok': True, 'count': 1,
+                                         'note': 'detector flagged the file as AI; it misfires on old/compressed photos — search continues'}
 
     # ---- round 0: harvest + inspect
     progress('جاري البحث في المحركات (Lens, Vision, TinEye, Yandex)...')
