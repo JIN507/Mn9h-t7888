@@ -823,6 +823,24 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
     chosen = oe.prioritize(cands, limit, budget['per_domain'], by_frame=n_frames > 1)
     progress(f'{len(cands)} مرشحاً فريداً — فحص {len(chosen)} صفحة...')
     inv.inspect(chosen)
+    # The query is a derivative of a photo some page holds in full: the
+    # exact-match indexes know the ORIGINAL, so search with it right away.
+    pivot = oe.original_image_for_pivot(inv.timeline)
+    if pivot and inv.time_left() > 60:
+        progress('الصورة نسخة معدّلة — إعادة البحث بالصورة الأصلية...')
+        raw = []
+        for name in ('lens_exact_en', 'lens_exact_ar'):
+            got, st = oe.harvest_engine(name, pivot)
+            inv.engines_status[f'{name}@pivot'] = dict(st, pivot_image=pivot, auto=True)
+            raw.extend(got)
+        new = inv.add_candidates(raw, round_no=0)
+        if new:
+            oe.prescreen_candidates(new, query_sig, progress, limit=150)
+            more = oe.prioritize(new, min(12, budget['round0_inspect']), budget['per_domain'])
+            progress(f'{len(new)} مرشحاً من الصورة الأصلية — فحص {len(more)} صفحة...')
+            inv.inspect(more)
+        if isinstance(image_context, dict):
+            image_context['query_is_derivative_of'] = pivot
     round0_first = inv.first_seen()
 
     finish = run_agent(inv, image_context)

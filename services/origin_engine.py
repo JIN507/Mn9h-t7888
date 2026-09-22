@@ -387,6 +387,19 @@ def _failure_status(e):
     return {'ok': False, 'count': 0, 'note': str(e)[:120]}
 
 
+def reconcile_fetch_status(engines_status):
+    """Google answers "no results" both when it could not fetch the image
+    and when an exact-match query is genuinely empty. If the visual pass
+    fetched the same image fine, the exact passes' "no results" were
+    genuine empties — report them as such."""
+    if not (engines_status.get('lens_visual') or {}).get('ok'):
+        return engines_status
+    for name, st in list(engines_status.items()):
+        if name.startswith('lens_exact') and '@' not in name and (st or {}).get('note') == 'fetch_failed':
+            engines_status[name] = {'ok': True, 'count': 0, 'note': 'no exact matches'}
+    return engines_status
+
+
 def harvest_engine(name, image_url, alternates=()):
     """Run ONE engine (agent tool). Returns (matches, status_dict)."""
     tasks, unavailable = engine_table(image_url, alternates=alternates)
@@ -449,6 +462,7 @@ def _harvest(image_url, progress, engines_status, *, include_visual=True,
                 fut.cancel()
     finally:
         ex.shutdown(wait=False)
+    reconcile_fetch_status(engines_status)
     return matches
 
 
@@ -925,6 +939,8 @@ def _is_temporal_outlier(item, eligible):
     v = item['visual']
     if not (v.get('match_kind') == 'variant' and v.get('matched_from') == 'engine'):
         return False
+    if (v.get('geometry') or {}).get('same_scene'):
+        return False            # keypoint geometry settled it: same photograph
     strong = sorted(_days(i['published_at']) for i in eligible
                     if i is not item and i.get('confidence', 0) >= 0.9)
     if len(strong) < 5:
@@ -1018,6 +1034,24 @@ def earlier_hints(timeline, first_seen, limit=5):
 
 
 # ------------------------------------------------------------------- expand
+
+def original_image_for_pivot(timeline, query_size=None):
+    """When the query is a derivative (cropped / restored / recoloured) of
+    a photo found on some page, the page's full-size copy is closer to the
+    ORIGINAL file that the exact-match indexes know. Returns that image URL
+    or None when the query already matched exactly somewhere."""
+    if any((i.get('visual') or {}).get('match_kind') == 'exact' for i in timeline):
+        return None
+    pool = [i for i in timeline
+            if (i.get('visual') or {}).get('verdict') == 'confirmed'
+            and (i['visual'].get('geometry') or {}).get('same_scene')
+            and i['visual'].get('matched_image_url')
+            and i['visual'].get('matched_from') == 'page']
+    if not pool:
+        return None
+    pool.sort(key=lambda i: -(i['image_size'][0] * i['image_size'][1]) if i.get('image_size') else 0)
+    return pool[0]['visual']['matched_image_url']
+
 
 def _lens_pivot(first_seen, timeline, image_url, seen, progress, engines_status):
     """Re-search Lens using the best matched ORIGINAL image (higher-res,
