@@ -9,7 +9,7 @@ Media verification & provenance platform: AI-generation detection (image/video/a
 3. **REVERSE_SEARCH_PROVIDERS.md** — provider portfolio (Lens exact_matches, Vision Web Detection, TinEye, Yandex), harvesting rules, bake-off protocol.
 4. **ORIGIN_V2_PLAN.md** — the origin feature (image/video first publication) as built: package `origin/` (copies → engines → page-level verification → dates → one eligibility rule → report), identification track (DeepSeek names/event → Google text + Grok X), video via keyframes. v1 (`services/origin_engine.py`, `services/origin_agent.py`) was deleted. Gate before every merge: `python scripts/bench_origin.py --check` (seed cases in `benchmark/benchmark.yaml`, baseline in `benchmark/baseline_v1.json`; each run spends SerpAPI credits — run it deliberately, never in a loop).
 
-Work follows the roadmap phases in order unless Faisal says otherwise. Current status: **nothing implemented yet — Phase 0 (security) is the mandatory first task.**
+Work follows the roadmap phases in order unless Faisal says otherwise. Current status: Phases 0–2 of the master plan and the Origin v2 rebuild are done; see ORIGIN_V2_PLAN.md §12. **Never run live searches or the benchmark on your own initiative — Faisal tests himself.**
 
 ## Stack
 

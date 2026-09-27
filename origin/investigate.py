@@ -25,12 +25,13 @@ from origin.budget import Budget
 
 logger = logging.getLogger(__name__)
 
-VERIFY_WORKERS = 16
-ROUND1_PAGES = 60
+VERIFY_WORKERS = 20
+ROUND1_PAGES = 70
 ROUND2_PAGES = 24
-VERIFY_TIME_R1 = 45       # seconds, hard cap per verification round
+VERIFY_TIME_R1 = 55       # seconds, hard cap per verification round
 VERIFY_TIME_RN = 30
 PRESCREEN_TIME = 15
+THIN_LENS_ROWS = 3        # a Lens exact answer this small is retried once uncached (per-call variance)
 MAX_ROUNDS = 3
 MAX_FRAMES = 7            # extra video frames searched (each = one Lens credit)
 NEW_COPIES_PER_ROUND = 2
@@ -156,6 +157,7 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
     if sig is None:
         return _unavailable('cannot decode the query image', budget)
     inv.sigs = [sig]
+    inv.extras['prior_sightings'] = _prior_sightings(sig)
     if extras.get('screenshot'):
         shot = build_query_signature(data)
         if shot:
@@ -214,6 +216,15 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
         for name in ('lens_exact_en', 'lens_exact_ar', 'lens_visual'):
             cs.mark(small, name)
         answers.update(inv.run(tasks, timeout_s=60))
+    # thin Lens exact answers vary call to call: one uncached retry each
+    thin = [k for k in ('lens_exact_en', 'lens_exact_ar')
+            if answers.get(k) and answers[k].status in ('results', 'empty') and len(answers[k].candidates) < THIN_LENS_ROWS]
+    if thin and budget.time_left() > 70:
+        retry = []
+        for k in thin:
+            hl, cc = ('en', 'us') if k.endswith('en') else ('ar', 'sa')
+            retry.append((f'{k}@retry', (lambda hl=hl, cc=cc: engines.lens_exact(primary.url, hl, cc, primary.id, no_cache=True)), engines.LENS_CREDITS))
+        answers.update(inv.run(retry, timeout_s=40))
     # exact "refused" next to a visual that answered = genuinely no exact matches
     for k, a in answers.items():
         if k.startswith('lens_exact') and a.status == 'refused':
@@ -266,6 +277,9 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
             if i == 0 and rnd == 2 and len(tasks) < spare:
                 cs.mark(c, 'lens_exact_ar')
                 tasks.append((f'lens_exact_ar@copy{c.id}', (lambda c=c: engines.lens_exact(c.url, 'ar', 'sa', c.id)), engines.LENS_CREDITS))
+            if i == 0 and rnd == 2 and len(tasks) < spare:
+                cs.mark(c, 'lens_visual')            # the original's look-alikes name the people/event
+                tasks.append((f'lens_visual@copy{c.id}', (lambda c=c: engines.lens_visual(c.url, copy_id=c.id)), engines.LENS_CREDITS))
         answers = inv.run(tasks, timeout_s=50)
         raw = inv.new_candidates(answers)
         prescreen.run(engines.rank_candidates(raw, PER_DOMAIN * 4, 120), inv.sigs,
@@ -302,8 +316,41 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
     progress('تحديد أول ظهور...')
     payload = report.build(inv.sightings, copies=cs.briefs(), engines=inv.engines, budget=budget,
                            extras={**inv.extras, 'rounds': inv.rounds})
+    payload['prior_sightings'] = inv.extras.get('prior_sightings') or []
+    if payload.get('first_seen'):
+        fs = payload['first_seen']
+        fs['archived'] = {'url': f"https://web.archive.org/web/*/{fs['url']}", 'status': 'failed'}
+    _remember(data, image_url, payload)
     progress('اكتمل تحليل المصدر')
     return payload
+
+
+def _prior_sightings(sig):
+    """What our own index already knows about this picture (earlier searches
+    and their confirmed origins). Free, instant."""
+    try:
+        from services.vector_index import find_similar
+        emb = (sig or {}).get('embedding')
+        if emb is None:
+            return []
+        rows = find_similar(emb, limit=5, min_similarity=0.92)
+        return [{'similarity': round(r.get('similarity') or 0, 3), 'source': r.get('source'),
+                 'ref_url': r.get('ref_url'), 'seen_at': r.get('seen_at')} for r in rows if r.get('ref_url')]
+    except Exception as e:
+        logger.info('prior sightings lookup skipped: %s', e)
+        return []
+
+
+def _remember(data, image_url, payload):
+    """Index the query with its confirmed origin so the next search of the
+    same picture starts from the answer."""
+    try:
+        import hashlib
+        from services.vector_index import index_bytes
+        origin = (payload.get('first_seen') or {}).get('url')
+        index_bytes(data, hashlib.sha256(data).hexdigest(), source='sighting' if origin else 'query', ref_url=origin)
+    except Exception as e:
+        logger.info('indexing skipped: %s', e)
 
 
 def _identification_track(inv, image_bytes, candidates, out):

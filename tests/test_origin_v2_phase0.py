@@ -21,7 +21,7 @@ def test_budget_counts_and_refuses_over_cap():
     b.skip('round 3', 'no credits')
     snap = b.snapshot()
     assert snap['credits'] == 2 and snap['pages'] == 5 and snap['skipped'] == [{'step': 'round 3', 'reason': 'no credits'}]
-    assert Budget(kind='video').credits == 20 and Budget().credits == 12
+    assert Budget(kind='video').credits == 22 and Budget().credits == 15
 
 
 def test_canonical_urls_fold_platform_variants():

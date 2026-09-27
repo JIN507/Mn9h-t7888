@@ -5,6 +5,9 @@ set -o errexit
 echo "Installing Python dependencies..."
 pip install -r requirements.txt
 
+echo "Installing Chromium for the TinEye engine..."
+python -m playwright install chromium || echo "playwright install failed — TinEye engine will be skipped"
+
 echo "Installing Node.js..."
 # Install Node.js
 export NODE_VERSION=20.10.0

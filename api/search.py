@@ -188,7 +188,8 @@ def direct_search_api():
                                     'forensics', 'internal_sightings',
                                     # origin v2
                                     'version', 'first_seen_exact', 'version_note',
-                                    'leads', 'copies', 'budget', 'identity', 'screenshot')}
+                                    'leads', 'copies', 'budget', 'identity', 'screenshot',
+                                    'prior_sightings')}
                 payload.update({
                     'success': True,
                     'timeline': payload.get('timeline') or [],

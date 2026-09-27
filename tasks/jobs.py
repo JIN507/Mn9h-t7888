@@ -152,7 +152,7 @@ def run_direct_search(query=None, image_url=None, user_id=None,
         raw = {k: payload.get(k) for k in
                ('timeline', 'engine', 'version', 'first_seen', 'first_seen_exact',
                 'version_note', 'leads', 'copies', 'engines', 'budget', 'stats',
-                'rounds', 'note', 'identity', 'scenes', 'screenshot')}
+                'rounds', 'note', 'identity', 'scenes', 'screenshot', 'prior_sightings')}
         payload['search_id'] = persist_search(
             user_id, 'direct', query=None, image_url=image_url,
             image_hash=image_hash, image_phash=image_phash,

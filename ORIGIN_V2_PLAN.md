@@ -226,3 +226,24 @@ job runs; no push without Faisal's word.
 | Regressions during the rebuild | Seed benchmark from cases we already have (Maersk, restored singers photo, Abha clip, Instagram screenshot); baseline taken from the existing run logs, not new v1 runs (saves ~100 credits); Faisal tests independently |
 
 Alternatives considered and rejected: refactoring v1 in place (the rule pile is the problem); a browser-driven LLM agent reading screenshots (slow, CAPTCHA-bound, costly per step); paid Bing Visual Search API (Azure, low added value over Lens + Yandex). Optional upgrade later: the TinEye API (paid, bytes upload, crawl dates for every copy).
+
+---
+
+## 12. Status (2026-09-27)
+
+Built and committed: phases 0–4. `origin/` is the engine; v1 is deleted; the UI shows
+evidence levels, identity, copies, budget and unconfirmed leads; video runs per keyframe
+with scenes. Budgets: 150 s / 15 credits / 90 pages (video 200 / 22 / 120).
+
+What is guaranteed by construction: every configured resource runs on every search
+(Lens exact in two locales, Lens visual, Yandex, TinEye, the small-copy retry when Google
+refuses the file, Lens on the originals found on pages, Google text in Arabic and English,
+an X-scoped query, one Grok X question, the platforms' own media endpoints, our own index);
+nothing is called an origin unless its page or platform showed the image and its date comes
+from a post id or declared metadata; every skipped step and every credit is in the report.
+
+What cannot be guaranteed: that Google returns the original post's row on a given call.
+The design compensates with independent draws; when the original is missing from every
+draw the report shows the earliest confirmed sighting and labels the rest as unconfirmed.
+
+Gate: one run on the seed set after the last fixes is still owed; Faisal runs his own tests.

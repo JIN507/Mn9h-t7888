@@ -463,3 +463,30 @@ def test_video_investigation_scenes(monkeypatch):
     assert [s['frame'] for s in payload['scenes']] == [1, 2]
     assert payload['scenes'][1]['first_seen']['link'] == 'https://x.com/b/status/1814515949699322069'
     assert payload['stats']['frames'] == 2 and payload['budget']['credits'] <= 20
+
+
+def test_thin_lens_answer_is_retried_uncached_once(monkeypatch):
+    from origin import investigate as inv_mod, identify
+    photo = _textured(41, (900, 700))
+    monkeypatch.setenv('SERPAPI_API_KEY', 'k'); monkeypatch.setenv('SCREENSHOT_CROP', 'false')
+    monkeypatch.setattr(inv_mod, '_download', lambda url: _jpeg(photo))
+    monkeypatch.setattr(inv_mod, '_prior_sightings', lambda sig: [])
+    monkeypatch.setattr(inv_mod, '_remember', lambda d, u, p: None)
+    monkeypatch.setattr(cp, 'host_bytes', lambda d, hint='x': f'https://pub.example/{hint}.jpg')
+    monkeypatch.setattr(cp, 'public_url_for_hosted', lambda u: 'https://pub.example/upload.jpg')
+    calls = []
+    monkeypatch.setattr(engines, 'lens_exact', lambda url, hl='en', country='us', copy_id=None, no_cache=False:
+                        calls.append((hl, no_cache)) or engines.EngineAnswer(f'lens_exact_{hl}', 'results', [
+                            {'url': 'https://news.example/one', 'engine': 'lens', 'match': 'exact', 'copy_id': copy_id}], 1, copy_id=copy_id))
+    monkeypatch.setattr(engines, 'lens_visual', lambda url, hl='en', country='us', copy_id=None, no_cache=False: engines.EngineAnswer('lens_visual', 'empty', [], 1, copy_id=copy_id))
+    monkeypatch.setattr(engines, 'yandex', lambda url, copy_id=None: engines.EngineAnswer('yandex', 'empty', [], 1, copy_id=copy_id))
+    monkeypatch.setattr(engines, 'tineye', lambda url, copy_id=None: engines.EngineAnswer('tineye', 'skipped', note='n/c'))
+    monkeypatch.setattr(identify, 'describe', lambda b: '')
+    monkeypatch.setattr(identify, 'identify', lambda d, t, c: None)
+    monkeypatch.setattr(verify, 'verify_page', lambda url, sigs, engine_thumbs=(), **k: {
+        'url': url, 'image': verify.ImageEvidence(), 'html': '', 'headers': None, 'title': 't', 'caption': None,
+        'created_at': None, 'extra_dates': [], 'tweet': None, 'matched_pil': None, 'fetch_error': False})
+    payload = inv_mod.investigate('https://r2/u.jpg?X=1', progress=lambda m: None)
+    assert ('en', True) in calls and ('ar', True) in calls                     # both thin answers retried uncached
+    assert payload['engines']['lens_exact_en@retry']['status'] == 'results'
+    assert payload['first_seen'] is None and payload['prior_sightings'] == []

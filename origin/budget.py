@@ -15,9 +15,9 @@ class Budget:
     def __init__(self, *, seconds=None, credits=None, pages=None, kind='image'):
         video = kind == 'video'
         self.seconds = float(seconds if seconds is not None else os.environ.get(
-            'ORIGIN_TIME_S_VIDEO' if video else 'ORIGIN_TIME_S', 180 if video else 120))
+            'ORIGIN_TIME_S_VIDEO' if video else 'ORIGIN_TIME_S', 200 if video else 150))
         self.credits = int(credits if credits is not None else os.environ.get(
-            'ORIGIN_CREDITS_VIDEO' if video else 'ORIGIN_CREDITS', 20 if video else 12))
+            'ORIGIN_CREDITS_VIDEO' if video else 'ORIGIN_CREDITS', 22 if video else 15))
         self.pages = int(pages if pages is not None else os.environ.get(
             'ORIGIN_PAGES_VIDEO' if video else 'ORIGIN_PAGES', 120 if video else 90))
         self.started = time.monotonic()

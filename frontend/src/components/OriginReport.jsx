@@ -143,6 +143,7 @@ export const parseOriginPayload = (payload) => (
         firstSeenExact: payload.first_seen_exact || null,
         versionNote: payload.version_note || null,
         identity: payload.identity || null,
+        priorSightings: payload.prior_sightings || [],
         leads: payload.leads || [],
         copies: payload.copies || [],
         budget: payload.budget || null,
@@ -364,6 +365,12 @@ export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = fal
 
             {report.versionNote && (
                 <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">{report.versionNote}</p>
+            )}
+            {report.priorSightings && report.priorSightings.length > 0 && (
+                <p className="text-[11px] text-slate-500 mt-2">
+                    بُحث عن هذه الصورة من قبل في هذه المنصة —
+                    {' '}<a href={report.priorSightings[0].ref_url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-slate-900" dir="ltr">{report.priorSightings[0].ref_url}</a>
+                </p>
             )}
             {report.firstSeenExact && (
                 <a href={report.firstSeenExact.url} target="_blank" rel="noopener noreferrer"
