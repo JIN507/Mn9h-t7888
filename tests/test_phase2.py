@@ -132,7 +132,7 @@ def test_direct_search_cache_by_hash(client, app, monkeypatch):
     import origin.investigate as inv_mod
     calls = []
     monkeypatch.setattr(inv_mod, 'investigate',
-                        lambda url, progress=None, extra_frame_urls=None: calls.append(url) or _fake_origin_payload())
+                        lambda url, progress=None, extra_frame_urls=None, **kw: calls.append(url) or _fake_origin_payload())
 
     fake_hash = 'f' * 64
     r1 = client.post('/api/direct-search', json={

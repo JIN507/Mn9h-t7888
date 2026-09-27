@@ -158,6 +158,7 @@ def direct_search_api():
         image_hash = data.get('image_hash') or request.form.get('image_hash')
         image_phash = data.get('image_phash') or request.form.get('image_phash')
         rerun = bool(data.get('rerun') or request.form.get('rerun'))
+        mode = 'quick' if (data.get('mode') or request.form.get('mode')) == 'quick' else 'deep'
 
         # Legacy path: direct file upload to this endpoint
         if not query and not image_url and 'file' in request.files:
@@ -178,6 +179,10 @@ def direct_search_api():
         # Repeat-search cache: same image hash -> instant answer, zero spend
         if image_url and image_hash and not rerun:
             cached = find_cached_search('direct', image_hash)
+            # a quick result never stands in for a requested deep search
+            if cached and cached.raw_response and mode == 'deep' and \
+                    (cached.raw_response.get('mode') or 'deep') != 'deep':
+                cached = None
             if cached and cached.raw_response:
                 logger.info('Direct-search cache hit: hash=%s', image_hash)
                 payload = {k: v for k, v in cached.raw_response.items()
@@ -189,7 +194,7 @@ def direct_search_api():
                                     # origin v2
                                     'version', 'first_seen_exact', 'version_note',
                                     'leads', 'copies', 'budget', 'identity', 'screenshot',
-                                    'prior_sightings')}
+                                    'prior_sightings', 'mode')}
                 payload.update({
                     'success': True,
                     'timeline': payload.get('timeline') or [],
@@ -207,7 +212,7 @@ def direct_search_api():
         job = enqueue(run_direct_search, query=query, image_url=image_url,
                       user_id=user.id if user else None,
                       image_hash=image_hash, image_phash=image_phash,
-                      extra_image_urls=extra_image_urls or None)
+                      extra_image_urls=extra_image_urls or None, mode=mode)
         return jsonify({
             'success': True,
             'job_id': job.id,

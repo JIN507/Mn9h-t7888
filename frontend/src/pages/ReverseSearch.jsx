@@ -89,8 +89,10 @@ const ReverseSearch = () => {
         }
     };
 
-    const handleSearch = async (rerun = false) => {
+    const [searchMode, setSearchMode] = useState('deep');
+    const handleSearch = async (rerun = false, mode = searchMode) => {
         if (!file) return;
+        setSearchMode(mode);
 
         setLoading(true);
         setErrors({ engines: null, timeline: null });
@@ -166,7 +168,8 @@ const ReverseSearch = () => {
                 image_url: uploadedImageUrl,
                 ...(extraUrls.length ? { image_urls: [uploadedImageUrl, ...extraUrls] } : {}),
                 ...uploadedHashes,
-                rerun
+                rerun,
+                mode
             }, { timeout: 30000 });
 
             if (timelineRes.status === 202 && timelineRes.data.job_id) {
@@ -260,22 +263,44 @@ const ReverseSearch = () => {
                     )}
                     <div className="mt-6 flex gap-3">
                         <button
-                            onClick={() => handleSearch()}
+                            onClick={() => handleSearch(false, 'quick')}
                             disabled={!file || loading}
                             className="ai-analyze-btn flex-1"
+                            title="Google Lens فقط، أسرع نتيجة ممكنة (حوالي نصف دقيقة)"
                         >
-                            {loading ? (
+                            {loading && searchMode === 'quick' ? (
                                 <span className="flex items-center justify-center gap-2">
                                     <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24" fill="none">
                                         <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-20" />
                                         <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
                                     </svg>
-                                    جاري البحث...
+                                    جاري البحث السريع...
                                 </span>
                             ) : (
                                 <span className="flex items-center justify-center gap-2">
                                     <Search className="w-5 h-5" />
-                                    ابحث عن المصدر
+                                    البحث السريع
+                                </span>
+                            )}
+                        </button>
+                        <button
+                            onClick={() => handleSearch(false, 'deep')}
+                            disabled={!file || loading}
+                            className="ai-analyze-btn flex-1"
+                            title="كل المحركات والمصادر مع التحقق من كل صفحة (دقيقتان تقريباً)"
+                        >
+                            {loading && searchMode === 'deep' ? (
+                                <span className="flex items-center justify-center gap-2">
+                                    <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24" fill="none">
+                                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-20" />
+                                        <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                                    </svg>
+                                    جاري البحث العميق...
+                                </span>
+                            ) : (
+                                <span className="flex items-center justify-center gap-2">
+                                    <Search className="w-5 h-5" />
+                                    البحث العميق
                                 </span>
                             )}
                         </button>

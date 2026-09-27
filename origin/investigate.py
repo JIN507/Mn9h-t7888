@@ -135,11 +135,13 @@ class Investigation:
         return merged
 
 
-def investigate(image_url, *, progress=None, extra_frame_urls=None):
+def investigate(image_url, *, progress=None, extra_frame_urls=None, mode='deep'):
     """Image investigation. Returns the UI payload (see report.build).
-    Never raises."""
+    mode: 'deep' (every resource, rounds, identification) or 'quick' (Lens
+    exact + visual on the upload, top pages verified, no LLM). Never raises."""
     progress = progress or _noop
-    budget = Budget(kind='video' if extra_frame_urls else 'image')
+    quick = mode == 'quick'
+    budget = Budget(kind='video' if extra_frame_urls else 'image', mode=mode)
     inv = Investigation(image_url, progress, budget)
     if not os.environ.get('SERPAPI_API_KEY'):
         return _unavailable('SerpAPI key not configured', budget)
@@ -191,35 +193,45 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
         inv.extras['frames'] = [c.url for c in frame_copies]
 
     # 1. round 1
-    progress('البحث في المحركات (Lens, Yandex, TinEye)...')
-    tasks = [
-        ('lens_exact_en', lambda: engines.lens_exact(primary.url, 'en', 'us', primary.id), engines.LENS_CREDITS),
-        ('lens_exact_ar', lambda: engines.lens_exact(primary.url, 'ar', 'sa', primary.id), engines.LENS_CREDITS),
-        ('lens_visual', lambda: engines.lens_visual(primary.url, copy_id=primary.id), engines.LENS_CREDITS),
-        ('yandex', lambda: engines.yandex(primary.url, primary.id), engines.YANDEX_CREDITS),
-        ('tineye', lambda: engines.tineye(primary.url, primary.id), 0),
-    ]
-    for name in ('lens_exact_en', 'lens_exact_ar', 'lens_visual', 'yandex', 'tineye'):
-        cs.mark(primary, name)
+    if quick:
+        progress('البحث السريع (Google Lens)...')
+        tasks = [
+            ('lens_exact_en', lambda: engines.lens_exact(primary.url, 'en', 'us', primary.id), engines.LENS_CREDITS),
+            ('lens_visual', lambda: engines.lens_visual(primary.url, copy_id=primary.id), engines.LENS_CREDITS),
+        ]
+        for name in ('lens_exact_en', 'lens_visual'):
+            cs.mark(primary, name)
+    else:
+        progress('البحث في المحركات (Lens, Yandex, TinEye)...')
+        tasks = [
+            ('lens_exact_en', lambda: engines.lens_exact(primary.url, 'en', 'us', primary.id), engines.LENS_CREDITS),
+            ('lens_exact_ar', lambda: engines.lens_exact(primary.url, 'ar', 'sa', primary.id), engines.LENS_CREDITS),
+            ('lens_visual', lambda: engines.lens_visual(primary.url, copy_id=primary.id), engines.LENS_CREDITS),
+            ('yandex', lambda: engines.yandex(primary.url, primary.id), engines.YANDEX_CREDITS),
+            ('tineye', lambda: engines.tineye(primary.url, primary.id), 0),
+        ]
+        for name in ('lens_exact_en', 'lens_exact_ar', 'lens_visual', 'yandex', 'tineye'):
+            cs.mark(primary, name)
     for c in frame_copies:                      # one Lens exact per extra frame
         cs.mark(c, 'lens_exact_en')
         tasks.append((f'lens_exact_en@frame{c.id}', (lambda c=c: engines.lens_exact(c.url, 'en', 'us', c.id)), engines.LENS_CREDITS))
-    answers = inv.run(tasks, timeout_s=70)
+    answers = inv.run(tasks, timeout_s=25 if quick else 70)
     refused = (answers.get('lens_visual') and answers['lens_visual'].status == 'refused')
-    if refused and small is not None and budget.time_left() > 60:
+    if refused and small is not None and budget.time_left() > (15 if quick else 60):
         progress('لم يقبل Google الملف — إعادة البحث بنسخة مصغّرة...')
         tasks = [
             ('lens_exact_en@small', lambda: engines.lens_exact(small.url, 'en', 'us', small.id, no_cache=True), engines.LENS_CREDITS),
-            ('lens_exact_ar@small', lambda: engines.lens_exact(small.url, 'ar', 'sa', small.id, no_cache=True), engines.LENS_CREDITS),
             ('lens_visual@small', lambda: engines.lens_visual(small.url, copy_id=small.id, no_cache=True), engines.LENS_CREDITS),
         ]
+        if not quick:
+            tasks.append(('lens_exact_ar@small', lambda: engines.lens_exact(small.url, 'ar', 'sa', small.id, no_cache=True), engines.LENS_CREDITS))
         for name in ('lens_exact_en', 'lens_exact_ar', 'lens_visual'):
             cs.mark(small, name)
-        answers.update(inv.run(tasks, timeout_s=60))
+        answers.update(inv.run(tasks, timeout_s=20 if quick else 60))
     # thin Lens exact answers vary call to call: one uncached retry each
     thin = [k for k in ('lens_exact_en', 'lens_exact_ar')
             if answers.get(k) and answers[k].status in ('results', 'empty') and len(answers[k].candidates) < THIN_LENS_ROWS]
-    if thin and budget.time_left() > 70:
+    if thin and not quick and budget.time_left() > 70:
         retry = []
         for k in thin:
             hl, cc = ('en', 'us') if k.endswith('en') else ('ar', 'sa')
@@ -236,6 +248,13 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
     # 2. rank cheaply (ids date posts for free), pre-screen the top thumbnails
     #    (no credits), rank again, verify round 1
     raw = inv.new_candidates(answers)
+    if quick:
+        # fastest useful path: earliest-dated social posts and exact rows first,
+        # a short verification window, then decide
+        cands = engines.rank_candidates(raw, PER_DOMAIN, budget.pages)
+        inv.rounds.append({'round': 1, 'candidates': len(raw), 'verified': len(cands)})
+        inv.verify_many(cands, 1, time_cap=max(10, min(25, budget.time_left() - 8)))
+        return _finish(inv, cs, budget, data, image_url, progress, ident=None)
     # identification track (LLM + text + Grok) starts NOW, from the engine
     # titles, and runs while verification and later rounds proceed
     ident = {'identity': None, 'answers': {}, 'description': ''}
@@ -312,10 +331,15 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
         inv.extras['identity'] = ident['identity']
         inv.extras['identity']['description'] = ident.get('description') or None
 
+    return _finish(inv, cs, budget, data, image_url, progress, ident=ident)
+
+
+def _finish(inv, cs, budget, data, image_url, progress, ident=None):
     # 5. decide
     progress('تحديد أول ظهور...')
     payload = report.build(inv.sightings, copies=cs.briefs(), engines=inv.engines, budget=budget,
                            extras={**inv.extras, 'rounds': inv.rounds})
+    payload['mode'] = budget.mode
     payload['prior_sightings'] = inv.extras.get('prior_sightings') or []
     if budget.time_left() > 5:
         from origin import translate

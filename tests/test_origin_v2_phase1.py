@@ -502,3 +502,33 @@ def test_titles_translated_to_arabic_in_the_job(monkeypatch):
     assert translate.translate_titles(items) == 1
     assert items[0]['title_ar'] == 'خفر السواحل الهندي على X' and 'title_ar' not in items[1]
     assert translate.needs_translation('12345') is False
+
+
+def test_quick_mode_uses_only_lens_and_no_llm(monkeypatch):
+    from origin import investigate as inv_mod, identify
+    photo = _textured(51, (900, 700))
+    monkeypatch.setenv('SERPAPI_API_KEY', 'k'); monkeypatch.setenv('SCREENSHOT_CROP', 'false')
+    monkeypatch.setattr(inv_mod, '_download', lambda url: _jpeg(photo))
+    monkeypatch.setattr(inv_mod, '_prior_sightings', lambda sig: [])
+    monkeypatch.setattr(inv_mod, '_remember', lambda d, u, p: None)
+    monkeypatch.setattr(cp, 'host_bytes', lambda d, hint='x': f'https://pub.example/{hint}.jpg')
+    monkeypatch.setattr(cp, 'public_url_for_hosted', lambda u: 'https://pub.example/upload.jpg')
+    called = []
+    monkeypatch.setattr(engines, 'lens_exact', lambda url, hl='en', country='us', copy_id=None, no_cache=False:
+                        called.append(f'lens_exact_{hl}') or engines.EngineAnswer(f'lens_exact_{hl}', 'results', [
+                            {'url': 'https://x.com/a/status/1814337329387175999', 'engine': 'lens', 'match': 'exact', 'copy_id': copy_id}], 1, copy_id=copy_id))
+    monkeypatch.setattr(engines, 'lens_visual', lambda url, hl='en', country='us', copy_id=None, no_cache=False:
+                        called.append('lens_visual') or engines.EngineAnswer('lens_visual', 'empty', [], 1, copy_id=copy_id))
+    monkeypatch.setattr(engines, 'yandex', lambda url, copy_id=None: called.append('yandex') or engines.EngineAnswer('yandex', 'empty', [], 1))
+    monkeypatch.setattr(engines, 'tineye', lambda url, copy_id=None: called.append('tineye') or engines.EngineAnswer('tineye', 'empty', []))
+    monkeypatch.setattr(identify, 'describe', lambda b: called.append('llm') or '')
+    monkeypatch.setattr(identify, 'identify', lambda d, t, c: called.append('llm') or None)
+    monkeypatch.setattr(verify, 'verify_page', lambda url, sigs, engine_thumbs=(), **k: {
+        'url': url, 'image': verify.ImageEvidence(level='platform', kind='exact', matched_url='https://pbs/x.jpg', width=800, height=600),
+        'html': '', 'headers': None, 'title': 'ICG', 'caption': None, 'created_at': None, 'extra_dates': [],
+        'tweet': {'created_at': '2024-07-19T16:31:42.000Z', 'text': 't'}, 'matched_pil': None, 'fetch_error': False})
+    payload = inv_mod.investigate('https://r2/u.jpg?X=1', progress=lambda m: None, mode='quick')
+    assert set(called) == {'lens_exact_en', 'lens_visual'}                       # no Arabic locale, Yandex, TinEye or LLM
+    assert payload['mode'] == 'quick' and payload['budget']['credits'] == 2 and payload['budget']['credits_cap'] == 4
+    assert payload['first_seen']['link'] == 'https://x.com/a/status/1814337329387175999'
+    assert payload['engine'] == 'origin_engine' and payload['version'] == 2      # same UI payload

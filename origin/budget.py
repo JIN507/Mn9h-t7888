@@ -12,8 +12,13 @@ class BudgetExceeded(Exception):
 
 
 class Budget:
-    def __init__(self, *, seconds=None, credits=None, pages=None, kind='image'):
+    def __init__(self, *, seconds=None, credits=None, pages=None, kind='image', mode='deep'):
         video = kind == 'video'
+        if mode == 'quick':
+            seconds = float(seconds if seconds is not None else os.environ.get('ORIGIN_QUICK_TIME_S', 45))
+            credits = int(credits if credits is not None else os.environ.get('ORIGIN_QUICK_CREDITS', 4))
+            pages = int(pages if pages is not None else os.environ.get('ORIGIN_QUICK_PAGES', 24))
+        self.mode = mode
         self.seconds = float(seconds if seconds is not None else os.environ.get(
             'ORIGIN_TIME_S_VIDEO' if video else 'ORIGIN_TIME_S', 200 if video else 150))
         self.credits = int(credits if credits is not None else os.environ.get(
@@ -65,7 +70,7 @@ class Budget:
 
     def snapshot(self):
         with self._lock:
-            return {'seconds': round(self.elapsed(), 1), 'seconds_cap': self.seconds,
+            return {'mode': self.mode, 'seconds': round(self.elapsed(), 1), 'seconds_cap': self.seconds,
                     'credits': self.spent_credits, 'credits_cap': self.credits,
                     'pages': self.spent_pages, 'pages_cap': self.pages,
                     'skipped': list(self.skipped)}

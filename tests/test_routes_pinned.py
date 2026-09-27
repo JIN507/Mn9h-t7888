@@ -246,7 +246,7 @@ def _fake_origin_payload():
 def test_direct_search_image_mode_runs_origin_v2(client, monkeypatch):
     import origin.investigate as inv_mod
     monkeypatch.setattr(inv_mod, 'investigate',
-                        lambda url, progress=None, extra_frame_urls=None: _fake_origin_payload())
+                        lambda url, progress=None, extra_frame_urls=None, **kw: _fake_origin_payload())
     r = client.post('/api/direct-search', json={'image_url': HOSTED_IMG})
     d = _finished_job(client, r)['payload']
     assert d['success'] is True and d['engine'] == 'origin_engine' and d['version'] == 2
@@ -256,7 +256,7 @@ def test_direct_search_image_mode_runs_origin_v2(client, monkeypatch):
 def test_direct_search_image_mode_reports_engine_failure(client, monkeypatch):
     import origin.investigate as inv_mod
     monkeypatch.setattr(inv_mod, 'investigate',
-                        lambda url, progress=None, extra_frame_urls=None: {'success': False, 'note': 'SerpAPI key not configured'})
+                        lambda url, progress=None, extra_frame_urls=None, **kw: {'success': False, 'note': 'SerpAPI key not configured'})
     r = client.post('/api/direct-search', json={'image_url': HOSTED_IMG})
     res = _finished_job(client, r)
     assert res['status'] == 502 and 'SerpAPI' in res['payload']['error']

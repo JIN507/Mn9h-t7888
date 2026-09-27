@@ -124,7 +124,8 @@ def run_xai_investigation(image_url, user_id=None):
 
 @_with_app_context
 def run_direct_search(query=None, image_url=None, user_id=None,
-                      image_hash=None, image_phash=None, extra_image_urls=None):
+                      image_hash=None, image_phash=None, extra_image_urls=None,
+                      mode='deep'):
     """Origin search as a background job.
 
     Image mode: Origin v2 (origin/investigate.py) — copies, engines, page-level
@@ -136,7 +137,7 @@ def run_direct_search(query=None, image_url=None, user_id=None,
     if image_url:
         from origin.investigate import investigate
         payload = investigate(image_url, progress=_progress,
-                              extra_frame_urls=extra_image_urls)
+                              extra_frame_urls=extra_image_urls, mode=mode)
         if not payload.get('success'):
             return {'status': 502, 'payload': {
                 'error': payload.get('note') or 'origin engine unavailable', 'success': False}}
@@ -152,7 +153,7 @@ def run_direct_search(query=None, image_url=None, user_id=None,
         raw = {k: payload.get(k) for k in
                ('timeline', 'engine', 'version', 'first_seen', 'first_seen_exact',
                 'version_note', 'leads', 'copies', 'engines', 'budget', 'stats',
-                'rounds', 'note', 'identity', 'scenes', 'screenshot', 'prior_sightings')}
+                'rounds', 'note', 'identity', 'scenes', 'screenshot', 'prior_sightings', 'mode')}
         payload['search_id'] = persist_search(
             user_id, 'direct', query=None, image_url=image_url,
             image_hash=image_hash, image_phash=image_phash,

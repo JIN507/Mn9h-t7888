@@ -81,7 +81,7 @@ def test_direct_search_route_runs_origin_v2_and_persists(client, monkeypatch):
             'total': 1, 'leads': [], 'copies': [], 'engines': {'lens_exact_en': {'status': 'results', 'count': 3, 'credits': 1}},
             'budget': {'credits': 5}, 'stats': {'checked': 1, 'visually_confirmed': 1}, 'rounds': [], 'note': None,
             'identity': {'event_ar': 'حدث', 'label': 'استنتاج'}, 'scenes': [], 'screenshot': False}
-    monkeypatch.setattr(inv_mod, 'investigate', lambda url, progress=None, extra_frame_urls=None: dict(fake))
+    monkeypatch.setattr(inv_mod, 'investigate', lambda url, progress=None, extra_frame_urls=None, **kw: dict(fake))
     r = client.post('/api/direct-search', json={'image_url': 'https://img.example/q.jpg', 'image_hash': 'h' * 64})
     assert r.status_code == 202
     job_id = r.get_json()['job_id']
@@ -95,3 +95,23 @@ def test_direct_search_route_runs_origin_v2_and_persists(client, monkeypatch):
     r2 = client.post('/api/direct-search', json={'image_url': 'https://img.example/q.jpg', 'image_hash': 'h' * 64})
     body = r2.get_json()
     assert body.get('cached') is True and body['version'] == 2 and body['identity']['label'] == 'استنتاج'
+
+
+def test_quick_cache_never_answers_a_deep_request(client, monkeypatch):
+    import origin.investigate as inv_mod
+    modes = []
+    def fake(url, progress=None, extra_frame_urls=None, mode='deep'):
+        modes.append(mode)
+        return {'success': True, 'engine': 'origin_engine', 'version': 2, 'mode': mode, 'first_seen': None,
+                'timeline': [], 'total': 0, 'leads': [], 'copies': [], 'engines': {}, 'budget': {'credits': 1, 'mode': mode},
+                'stats': {}, 'rounds': [], 'note': None, 'identity': None, 'scenes': [], 'screenshot': False,
+                'first_seen_exact': None, 'version_note': None}
+    monkeypatch.setattr(inv_mod, 'investigate', fake)
+    h = 'q' * 64
+    r = client.post('/api/direct-search', json={'image_url': 'https://img.example/q.jpg', 'image_hash': h, 'mode': 'quick'})
+    client.get(f"/api/jobs/{r.get_json()['job_id']}")
+    assert modes == ['quick']
+    r2 = client.post('/api/direct-search', json={'image_url': 'https://img.example/q.jpg', 'image_hash': h})   # deep
+    assert r2.status_code == 202 and modes == ['quick', 'deep']                  # not served from the quick cache
+    r3 = client.post('/api/direct-search', json={'image_url': 'https://img.example/q.jpg', 'image_hash': h, 'mode': 'quick'})
+    assert r3.status_code == 200 and r3.get_json().get('cached') is True         # quick may reuse the stored deep result
