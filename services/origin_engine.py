@@ -842,6 +842,18 @@ def inspect_candidate(cand, query_sig, *, use_wayback=True, strict=False):
                              extra_image_urls=cand.get('engine_images') or [],
                              keep_bytes=True) if query_sig else {'verdict': 'unverified'}
 
+    # X posts: the page is JavaScript-only, but the syndication data has the
+    # caption — names, credits, context the agent's text search needs.
+    if not out.get('snippet') or out['title'] == cand['domain']:
+        try:
+            from providers import tweet
+            info = tweet.tweet_info(url) if tweet.status_id(url) else None
+            if info and info.get('text'):
+                out['snippet'] = out.get('snippet') or info['text'][:600]
+                if out['title'] == cand['domain'] or not cand.get('title'):
+                    out['title'] = info['text'][:140]
+        except Exception as e:
+            logger.info('tweet text unavailable for %s: %s', url, e)
     blob = visual.pop('matched_image_bytes', None)
     img_headers = visual.pop('matched_headers', None)
     size = visual.pop('matched_size', None)
@@ -1092,6 +1104,7 @@ def earlier_hints(timeline, first_seen, limit=5):
 # ------------------------------------------------------------------- expand
 
 PIVOT_PER_HOST = 2
+PIVOT_MIN_PX = 400        # smaller copies are thumbnails; they surface nothing new
 
 
 def original_images_for_pivot(timeline, limit=3, exclude=()):
@@ -1108,14 +1121,23 @@ def original_images_for_pivot(timeline, limit=3, exclude=()):
             and (i['visual'].get('geometry') or {}).get('same_scene')
             and i['visual'].get('matched_image_url')
             and i['visual'].get('matched_from') == 'page']
-    pool.sort(key=lambda i: -(i['image_size'][0] * i['image_size'][1]) if i.get('image_size') else 0)
-    out, per_host = [], {}
+    def _key(i):
+        url = i['visual']['matched_image_url']
+        area = (i['image_size'][0] * i['image_size'][1]) if i.get('image_size') else 0
+        return (0 if 'twimg.com' in url else 1, -area)      # X media = the poster's own file
+    pool.sort(key=_key)
+    out, per_host, seen_files = [], {}, set()
     for i in pool:
         url = i['visual']['matched_image_url']
+        size = i.get('image_size') or [0, 0]
+        if size and min(size) and min(size) < PIVOT_MIN_PX:
+            continue                                         # a thumbnail, not the file
         host = domain_of(url)
-        if url in out or url in exclude or per_host.get(host, 0) >= PIVOT_PER_HOST:
+        stem = urlparse(url).path.rsplit('/', 1)[-1].split('.')[0]   # CDN size variants share it
+        if url in out or url in exclude or stem in seen_files or per_host.get(host, 0) >= PIVOT_PER_HOST:
             continue
         out.append(url)
+        seen_files.add(stem)
         per_host[host] = per_host.get(host, 0) + 1
         if len(out) >= limit:
             break

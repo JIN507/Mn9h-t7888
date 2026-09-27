@@ -99,10 +99,16 @@ _IG_CODE = re.compile(r'instagram\.com/(?:[A-Za-z0-9_.]+/)?(?:p|reel|reels|tv)/(
 
 def platform_image_urls(page_url):
     """Direct image URLs a platform exposes for a post even when the page
-    itself hides them from us. Instagram: the /media/ redirect."""
+    itself hides them from us. Instagram: the /media/ redirect. X/Twitter:
+    the post's photos at full resolution via the syndication endpoint."""
     m = _IG_CODE.search(page_url or '')
     if m:
         return [f'https://www.instagram.com/p/{m.group(1)}/media/?size=l']
+    from providers import tweet
+    if tweet.status_id(page_url or ''):
+        info = tweet.tweet_info(page_url)
+        if info and info.get('photos'):
+            return list(info['photos'])[:4]
     return []
 
 
@@ -232,11 +238,15 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
     for found in extract_candidate_images(html or '', url):
         if found not in candidates:
             candidates.append(found)
-    frames = video_frame_urls(url) + platform_image_urls(url)
+    platform = platform_image_urls(url)
+    frames = video_frame_urls(url)
+    for f in reversed(platform):          # the platform's own media first
+        if f not in candidates:
+            candidates.insert(0, f)
     for f in frames:
         if f not in candidates:
-            candidates.insert(0, f) if 'instagram.com' in f else candidates.append(f)
-    candidates = candidates[:max_images + len(extra_image_urls or []) + len(frames)]
+            candidates.append(f)
+    candidates = candidates[:max_images + len(extra_image_urls or []) + len(frames) + len(platform)]
     if not candidates:
         out['verdict'] = 'no_image'
         return out

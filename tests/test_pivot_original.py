@@ -43,9 +43,9 @@ def test_original_image_for_pivot_prefers_largest_page_copy():
     tl.append({'visual': {'verdict': 'confirmed', 'match_kind': 'variant', 'matched_from': 'page',
                           'geometry': {'same_scene': True}, 'matched_image_url': 'https://b/other.jpg'},
                'image_size': [500, 500]})
-    # largest first, at most two per host, engine thumbnails never
-    assert oe.original_images_for_pivot(tl) == ['https://a/big.jpg', 'https://b/other.jpg', 'https://a/small.jpg']
-    assert oe.original_images_for_pivot(tl, exclude={'https://a/big.jpg'}) == ['https://b/other.jpg', 'https://a/small.jpg']
+    # largest first, at most two per host; 236 px copies are thumbnails; engine thumbnails never
+    assert oe.original_images_for_pivot(tl) == ['https://a/big.jpg', 'https://b/other.jpg']
+    assert oe.original_images_for_pivot(tl, exclude={'https://a/big.jpg'}) == ['https://b/other.jpg']
     tl.append({'visual': {'verdict': 'confirmed', 'match_kind': 'variant', 'matched_from': 'page',
                           'geometry': {'same_scene': True}, 'matched_image_url': 'https://a/mid.jpg'},
                'image_size': [700, 700]})
