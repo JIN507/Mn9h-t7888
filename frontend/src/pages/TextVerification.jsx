@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { FileText, ShieldCheck, Send, RotateCcw } from 'lucide-react';
+import { FileText, ShieldCheck, Send, RotateCcw, Download, Copy, Check } from 'lucide-react';
 import apiClient from '../services/apiClient';
+import { printTextReport } from '../utils/textReportPdf';
 import GlassCard from '../components/GlassCard';
 import ResultCard from '../components/ResultCard';
 import ErrorBanner from '../components/ErrorBanner';
@@ -44,9 +45,23 @@ const TextVerification = () => {
         setError(null);
     };
 
+    const [copied, setCopied] = useState(false);
     const isAI = result?.is_ai;
     const charCount = text.trim().length;
-    const isValid = charCount >= 20;
+    const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+    const isValid = charCount >= 250;
+    const blocks = Array.isArray(result?.annotations) ? result.annotations : [];
+    const flagged = blocks.filter((b) => b.is_ai).length;
+    const handleExport = () => {
+        if (!printTextReport(result, text)) setError('المتصفح منع فتح نافذة التقرير — اسمح بالنوافذ المنبثقة ثم أعد المحاولة');
+    };
+    const handleCopy = async () => {
+        try {
+            const summary = `${result.verdict} — توليد اصطناعي ${Math.round((result.confidence_ai || 0) * 100)}% · بشري ${Math.round((result.confidence_human || 0) * 100)}%`;
+            await navigator.clipboard.writeText(summary);
+            setCopied(true); setTimeout(() => setCopied(false), 1500);
+        } catch { /* clipboard unavailable */ }
+    };
 
     return (
         <div className="max-w-4xl mx-auto page-container">
@@ -72,7 +87,7 @@ const TextVerification = () => {
                             dir="auto"
                         />
                         <div className="absolute bottom-3 left-3 text-xs text-slate-400 font-mono">
-                            {charCount} <span className="text-slate-300">حرف</span>
+                            {charCount} <span className="text-slate-300">حرف</span> · {wordCount} <span className="text-slate-300">كلمة</span>
                             {charCount > 0 && charCount < 250 && (
                                 <span className="text-red-400 mr-2">• يجب 250 حرفاً على الأقل</span>
                             )}
@@ -143,6 +158,32 @@ const TextVerification = () => {
             {result && !loading && (
                 <div className="animate-fade-in-up delay-100">
                     <ResultCard title="نتيجة تحليل النص" isAI={isAI} verdict={result.verdict}>
+                        {/* Summary tiles */}
+                        <div className="grid grid-cols-3 gap-2 mb-4">
+                            <div className="p-3 rounded-xl border border-slate-200 bg-white">
+                                <p className="text-[10px] text-slate-500">توليد اصطناعي</p>
+                                <p className="text-lg font-black text-slate-800" dir="ltr">{Math.round((result.confidence_ai || 0) * 100)}%</p>
+                            </div>
+                            <div className="p-3 rounded-xl border border-slate-200 bg-white">
+                                <p className="text-[10px] text-slate-500">كتابة بشرية</p>
+                                <p className="text-lg font-black text-slate-800" dir="ltr">{Math.round((result.confidence_human || 0) * 100)}%</p>
+                            </div>
+                            <div className="p-3 rounded-xl border border-slate-200 bg-white">
+                                <p className="text-[10px] text-slate-500">فقرات مشتبهة</p>
+                                <p className="text-lg font-black text-slate-800" dir="ltr">{flagged}<span className="text-slate-400 text-sm"> / {blocks.length || 1}</span></p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2 mb-4">
+                            <button type="button" onClick={handleExport}
+                                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 text-white text-xs font-bold hover:bg-slate-700 transition-all">
+                                <Download className="w-4 h-4" /> تصدير PDF
+                            </button>
+                            <button type="button" onClick={handleCopy}
+                                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white text-slate-700 text-xs font-bold border border-slate-200 hover:border-slate-300 transition-all">
+                                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied ? 'نُسخ' : 'نسخ الخلاصة'}
+                            </button>
+                            {result.cached && <span className="text-[10px] text-slate-400">نتيجة محفوظة من فحص سابق</span>}
+                        </div>
                         <ConfidenceGauge bars={[
                             { label: 'توليد اصطناعي (AI)', value: result.confidence_ai,
                               colorClass: 'bg-gradient-to-r from-slate-800 to-slate-600' },
@@ -151,26 +192,34 @@ const TextVerification = () => {
                               labelClass: 'text-slate-500', valueClass: 'text-slate-500' },
                         ]} />
 
-                        {/* Annotations */}
-                        {result.annotations && result.annotations.length > 0 && (
+                        {/* The text itself, paragraph by paragraph, with the model's reading */}
+                        {blocks.length > 0 && (
                             <div className="mt-6 pt-4 border-t border-slate-100">
-                                <h4 className="font-bold text-slate-700 text-sm mb-3">تحليل تفصيلي للفقرات:</h4>
-                                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                                    {result.annotations.map((block, idx) => (
+                                <div className="flex items-center justify-between mb-3">
+                                    <h4 className="font-bold text-slate-700 text-sm">النص مع التحليل التفصيلي</h4>
+                                    <div className="flex items-center gap-3 text-[10px] text-slate-500">
+                                        <span className="flex items-center gap-1"><i className="inline-block w-2.5 h-2.5 rounded-sm bg-red-100 border border-red-200" /> مشتبه بتوليده</span>
+                                        <span className="flex items-center gap-1"><i className="inline-block w-2.5 h-2.5 rounded-sm bg-slate-100 border border-slate-200" /> بشري</span>
+                                    </div>
+                                </div>
+                                <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                                    {blocks.map((block, idx) => (
                                         <div key={idx} className={`p-3 rounded-xl border text-sm ${
                                             block.is_ai
-                                                ? 'bg-red-50/50 border-red-100 text-slate-700'
+                                                ? 'bg-red-50/60 border-red-100 text-slate-800'
                                                 : 'bg-slate-50 border-slate-100 text-slate-600'
                                         }`}>
-                                            <div className="flex justify-between items-center mb-1">
-                                                <span className={`text-xs font-bold ${block.is_ai ? 'text-red-500' : 'text-slate-500'}`}>
-                                                    {block.is_ai ? '🤖 AI' : '✍️ بشري'} — {Math.round((block.confidence || 0) * 100)}%
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${block.is_ai ? 'bg-white text-red-600 border border-red-100' : 'bg-white text-slate-600 border border-slate-200'}`}>
+                                                    {block.is_ai ? 'مولّد آلياً' : 'بشري'}
                                                 </span>
+                                                <span className="text-[10px] text-slate-400" dir="ltr">{Math.round((block.confidence || 0) * 100)}%</span>
                                             </div>
-                                            <p className="leading-relaxed text-xs" dir="auto">{block.text}</p>
+                                            <p className="leading-relaxed text-sm whitespace-pre-wrap" dir="auto">{block.text}</p>
                                         </div>
                                     ))}
                                 </div>
+                                <p className="text-[10px] text-slate-400 mt-3">النتيجة تقديرية من نموذج إحصائي؛ ادمجها مع أدلة أخرى قبل الحكم.</p>
                             </div>
                         )}
                     </ResultCard>
