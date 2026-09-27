@@ -74,3 +74,33 @@ def test_eligibility_honours_engine_only_outranked():
     assert oe._eligible_first(it) is True
     it['engine_only_outranked'] = 'https://x.com/real/status/1'
     assert oe._eligible_first(it) is False
+
+
+@responses.activate
+def test_geometry_engine_claim_needs_the_page_and_page_match_is_never_overwritten(monkeypatch):
+    query = _textured(21)
+    crop = query.crop((60, 40, 580, 440)).resize((900, 700))           # the engine's thumbnail: same photo, reframed
+    other = _textured(22)
+    sig = vv.build_query_signature(_jpeg(query))
+    sig['embedding'] = None
+    # engine thumbnail matches by geometry, page images show something else -> ambiguous
+    responses.add(responses.GET, 'https://engine.example/t.jpg', body=_jpeg(crop), content_type='image/jpeg')
+    responses.add(responses.GET, 'https://page.example/a.jpg', body=_jpeg(other), content_type='image/jpeg')
+    out = vv.verify_html('<html><img src="https://page.example/a.jpg"></html>', 'https://page.example/pin', sig,
+                         extra_image_urls=['https://engine.example/t.jpg'])
+    assert out['verdict'] == 'ambiguous' and 'engine thumbnail' in out['note']
+
+    # platform photo confirms by geometry; a later engine thumbnail with a higher
+    # embedding similarity must not steal the match
+    sig2 = vv.build_query_signature(_jpeg(query))
+    sig2['embedding'] = np.ones(4, dtype='float32')
+    sims = {'https://pbs.example/orig.jpg': 0.80, 'https://engine.example/t2.jpg': 0.97}
+    monkeypatch.setattr(vv, 'embed_image', lambda pil: pil.size)          # marker
+    monkeypatch.setattr(vv, 'cosine_similarity', lambda a, b: 0.80 if b == (900, 700) else 0.97)
+    monkeypatch.setattr(vv, 'platform_image_urls', lambda url: ['https://pbs.example/orig.jpg'])
+    responses.add(responses.GET, 'https://pbs.example/orig.jpg', body=_jpeg(crop), content_type='image/jpeg')
+    responses.add(responses.GET, 'https://engine.example/t2.jpg', body=_jpeg(crop.resize((450, 350))), content_type='image/jpeg')
+    out = vv.verify_html('<html></html>', 'https://x.example/status/1', sig2,
+                         extra_image_urls=['https://engine.example/t2.jpg'])
+    assert out['verdict'] == 'confirmed' and out['matched_from'] == 'page'
+    assert out['matched_image_url'] == 'https://pbs.example/orig.jpg'
