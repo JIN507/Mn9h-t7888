@@ -158,3 +158,15 @@ def test_scrape_reverse_search_merges_and_ranks(app):
     assert out['links'] == ['https://dup.example', 'https://sim.example',
                             'https://pg.example']
     assert set(out['search_urls'].keys()) == {'google', 'bing', 'yandex', 'tineye'}
+
+
+def test_aiornot_text_sends_lowercase_boolean_query(app):
+    """AIOrNot rejects include_annotations=True ("provided string was not
+    `true` or `false`") — every text check returned 400 until this was pinned."""
+    import responses as rsp
+    from providers.aiornot import post_text, TEXT_SYNC_URL
+    with rsp.RequestsMock() as rs:
+        rs.add(rs.POST, TEXT_SYNC_URL, json={'report': {}}, status=200)
+        post_text('some text to check for ai generation')
+        assert 'include_annotations=true' in rs.calls[0].request.url
+        assert rs.calls[0].request.headers['Content-Type'].startswith('multipart/form-data')

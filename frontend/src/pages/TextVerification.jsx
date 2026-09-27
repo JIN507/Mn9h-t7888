@@ -14,7 +14,7 @@ const TextVerification = () => {
     const [error, setError] = useState(null);
 
     const handleAnalyze = async () => {
-        if (!text.trim() || text.trim().length < 20) return;
+        if (!text.trim() || text.trim().length < 250) return;
 
         setLoading(true);
         setError(null);
@@ -67,14 +67,14 @@ const TextVerification = () => {
                         <textarea
                             value={text}
                             onChange={(e) => setText(e.target.value)}
-                            placeholder="ألصق النص هنا للتحليل... (20 حرف على الأقل)"
+                            placeholder="ألصق النص هنا للتحليل... (250 حرفاً على الأقل)"
                             className="w-full h-48 p-4 bg-slate-50 border border-slate-200 rounded-2xl text-slate-800 text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-transparent transition-all placeholder:text-slate-400"
                             dir="auto"
                         />
                         <div className="absolute bottom-3 left-3 text-xs text-slate-400 font-mono">
                             {charCount} <span className="text-slate-300">حرف</span>
-                            {charCount > 0 && charCount < 20 && (
-                                <span className="text-red-400 mr-2">• يجب 20 حرف على الأقل</span>
+                            {charCount > 0 && charCount < 250 && (
+                                <span className="text-red-400 mr-2">• يجب 250 حرفاً على الأقل</span>
                             )}
                         </div>
                     </div>

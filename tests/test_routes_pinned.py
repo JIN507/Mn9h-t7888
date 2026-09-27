@@ -128,7 +128,7 @@ def test_text_detection(client):
         }}}, status=200)
 
     r = client.post('/api/text-detection',
-                    json={'text': 'x' * 40})
+                    json={'text': 'x' * 300})
     d = r.get_json()
     assert r.status_code == 200
     assert d['success'] is True

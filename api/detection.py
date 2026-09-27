@@ -366,8 +366,8 @@ def api_text_detection():
         return jsonify({'error': 'لم يتم إرسال نص للتحليل', 'success': False}), 400
     
     text_content = data['text'].strip()
-    if len(text_content) < 20:
-        return jsonify({'error': 'النص قصير جداً — يجب أن يكون 20 حرف على الأقل', 'success': False}), 400
+    if len(text_content) < 250:
+        return jsonify({'error': 'النص قصير جداً — يجب أن يكون 250 حرفاً على الأقل', 'success': False}), 400
     
     aiornot_key = os.environ.get('AIORNOT_API_KEY')
     if not aiornot_key:
@@ -394,6 +394,7 @@ def api_text_detection():
             logger.info(f'[!] Text API error: {error_text}')
             return jsonify({
                 'error': f'فشل التحليل: {resp.status_code}',
+                'detail': error_text[:200],
                 'success': False
             }), 500
         

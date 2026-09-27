@@ -56,8 +56,10 @@ def post_text(text, include_annotations=True):
     return _provider.request(
         'POST', TEXT_SYNC_URL,
         headers=_auth_headers(),
-        data={'text': text},
-        params={'include_annotations': include_annotations},
+        # the endpoint accepts multipart/form-data only (a urlencoded or JSON body
+        # is answered with "Invalid boundary"); the flag must be "true"/"false"
+        files={'text': (None, text)},
+        params={'include_annotations': 'true' if include_annotations else 'false'},
         timeout=60)
 
 
