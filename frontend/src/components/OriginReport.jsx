@@ -12,7 +12,7 @@ export const ENGINE_LABELS = {
     vision: 'Google Vision', tineye: 'TinEye', tineye_web: 'TinEye (موقع)', yandex: 'Yandex',
     bing: 'Bing', bing_web: 'Bing (موقع)', lens_pivot: 'Lens (الأصل)', text_pivot: 'بحث نصي',
     grok: 'Grok', youtube: 'YouTube', prescreen: 'فرز المصغّرات', google_reverse: 'Google صفحات مطابقة',
-    screenshot_crop: 'اقتصاص لقطة الشاشة',
+    screenshot_crop: 'اقتصاص لقطة الشاشة', text1: 'بحث نصي', text2: 'بحث نصي', text3: 'بحث X',
 };
 
 export const TOOL_LABELS = {
@@ -108,7 +108,27 @@ export const VariantPill = ({ item }) => (
 
 const FETCH_FAILED_LABEL = 'لم يستطع Google قراءة الصورة من مضيفها — نتائج Lens ناقصة';
 export const fetchFailedEngines = (engines) => Object.entries(engines || {})
-    .filter(([, st]) => st && st.note === 'fetch_failed').map(([name]) => name);
+    .filter(([, st]) => st && (st.note === 'fetch_failed' || st.status === 'refused')).map(([name]) => name);
+
+/** Evidence pills (v2): how the image was seen and how the date is known. */
+const IMAGE_LEVEL = { platform: 'الصورة من المنصة نفسها', page: 'الصورة على الصفحة', engine_claim: 'مطابقة محرك فقط', none: 'لم تُرَ الصورة' };
+const DATE_LEVEL = { platform_id: 'توقيت المنشور', structured: 'تاريخ النشر المعلن', weak: 'تاريخ تقريبي', none: 'بدون تاريخ' };
+export const EvidencePills = ({ item }) => {
+    if (!item || !item.image_level) return null;
+    const strong = (item.image_level === 'platform' || item.image_level === 'page');
+    return (
+        <>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${strong ? 'bg-slate-100 text-slate-700' : 'bg-white border border-dashed border-slate-300 text-slate-500'}`}>
+                {IMAGE_LEVEL[item.image_level] || item.image_level}
+            </span>
+            {item.date_level && item.date_level !== 'none' && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-500">
+                    {DATE_LEVEL[item.date_level] || item.date_level}
+                </span>
+            )}
+        </>
+    );
+};
 
 export const PlatformPill = ({ url }) => {
     const name = platformOf(url);
@@ -122,6 +142,11 @@ export const parseOriginPayload = (payload) => (
         firstSeen: payload.first_seen || null,
         firstSeenExact: payload.first_seen_exact || null,
         versionNote: payload.version_note || null,
+        identity: payload.identity || null,
+        leads: payload.leads || [],
+        copies: payload.copies || [],
+        budget: payload.budget || null,
+        version: payload.version || 1,
         narrative: payload.narrative || null,
         engines: payload.engines || {},
         stats: payload.stats || {},
@@ -198,11 +223,13 @@ const KeyFacts = ({ report, videoMode, frames }) => {
     const [open, setOpen] = useState(false);
     const fs = report.firstSeen;
     const ctx = report.agent?.image_context || {};
+    const idn = report.identity || {};
     const when = fmtDateTime(fs?.published_at);
-    const place = ctx.place_guess_ar || ctx.place_guess || null;
+    const place = idn.place_ar || idn.place || ctx.place_guess_ar || ctx.place_guess || null;
+    const event = idn.event_ar || idn.event || null;
     const platform = fs ? platformOf(fs.url) : null;
-    const hasMore = Boolean(report.narrative || report.videoSummary || (frames && frames.length));
-    if (!fs && !hasMore) return null;
+    const hasMore = Boolean(report.narrative || report.videoSummary || (frames && frames.length) || (report.copies && report.copies.length) || idn.description);
+    if (!fs && !hasMore && !event) return null;
     return (
         <div className="mt-4">
             {fs && (
@@ -212,6 +239,12 @@ const KeyFacts = ({ report, videoMode, frames }) => {
                     <FactTile icon={MapPin} label="المكان" value={place} />
                     <FactTile icon={Globe} label="المنصة" value={platform} dir="ltr" />
                 </div>
+            )}
+            {event && (
+                <p className="text-[11px] text-slate-500 mt-2">
+                    <span className="font-bold text-slate-600">ما تُظهره الصورة (استنتاج): </span>{event}
+                    {idn.people && idn.people.length > 0 && <> · {idn.people.slice(0, 3).join('، ')}</>}
+                </p>
             )}
             {hasMore && (
                 <div className="mt-2">
@@ -241,6 +274,28 @@ const KeyFacts = ({ report, videoMode, frames }) => {
                                         <img key={i} src={src} alt="" className="w-10 h-8 object-cover rounded-md border border-slate-200" />
                                     ))}
                                 </div>
+                            )}
+                            {idn.description && (
+                                <div>
+                                    <p className="text-[10px] font-bold text-slate-500 mb-1">وصف الصورة</p>
+                                    <p className="text-sm text-slate-700 leading-relaxed" dir="auto">{idn.description}</p>
+                                </div>
+                            )}
+                            {report.copies && report.copies.length > 0 && (
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-[10px] text-slate-400">النسخ التي بحثنا بها ({report.copies.length}):</span>
+                                    {report.copies.slice(0, 8).map((c) => (
+                                        <a key={c.id} href={c.found_on || c.url} target="_blank" rel="noopener noreferrer" title={`${c.source} · ${c.size ? c.size.join('×') : ''}`}>
+                                            <img src={c.url} alt="" loading="lazy" referrerPolicy="no-referrer" className="w-10 h-8 object-cover rounded-md border border-slate-200 bg-slate-50" onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
+                                        </a>
+                                    ))}
+                                </div>
+                            )}
+                            {report.budget && (
+                                <p className="text-[10px] text-slate-400" dir="ltr">
+                                    {report.budget.seconds}s · {report.budget.credits} credits · {report.budget.pages} pages
+                                    {report.budget.skipped && report.budget.skipped.length > 0 && ` · skipped: ${report.budget.skipped.map((s) => s.step).join(', ')}`}
+                                </p>
                             )}
                         </div>
                     )}
@@ -283,6 +338,7 @@ export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = fal
                             <PlatformPill url={report.firstSeen.url} />
                             <ProbablePill item={report.firstSeen} />
                             <VariantPill item={report.firstSeen} />
+                            <EvidencePills item={report.firstSeen} />
                         </div>
                         <h3 className="font-bold text-slate-800 text-sm mb-1 line-clamp-2" dir="auto">{report.firstSeen.title}</h3>
                         <a href={report.firstSeen.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-slate-500 hover:text-slate-900 break-all line-clamp-1" dir="ltr">
@@ -350,9 +406,11 @@ export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = fal
             {Object.keys(report.engines || {}).length > 0 && (
                 <p className="text-[10px] text-slate-400 mt-4" dir="ltr">
                     {Object.entries(report.engines)
-                        .filter(([name, st]) => st.ok && st.count > 0 && ENGINE_LABELS[name.replace(/@.*$/, '')])
+                        .filter(([name, st]) => (st.ok || st.status === 'results') && st.count > 0 && ENGINE_LABELS[name.replace(/@.*$/, '')])
                         .map(([name, st]) => `${ENGINE_LABELS[name.replace(/@.*$/, '')] || name} ${st.count}`)
                         .join(' · ')}
+                    {Object.entries(report.engines).some(([, st]) => st.status === 'refused') && ' · محركات لم تقبل الصورة: '
+                        + Object.entries(report.engines).filter(([, st]) => st.status === 'refused').map(([name]) => ENGINE_LABELS[name.replace(/@.*$/, '')] || name).join(', ')}
                 </p>
             )}
 
@@ -459,7 +517,7 @@ export const TimelineCard = ({ report, timeline, cached = false, onRerun, error,
                                     <PlatformPill url={item.link} />
                                     {isFirst && <ProbablePill item={item} />}
                                     <VariantPill item={item} />
-                                    <VerdictPill item={item} />
+                                    {item.image_level ? <EvidencePills item={item} /> : <VerdictPill item={item} />}
                                 </div>
                                 <p className="font-bold text-xs text-slate-800 mt-1 line-clamp-1" dir="auto">{item.title}</p>
                                 <p className="text-[10px] text-slate-400 break-all line-clamp-1" dir="ltr">{item.link}</p>
@@ -470,6 +528,29 @@ export const TimelineCard = ({ report, timeline, cached = false, onRerun, error,
             </div>
         ) : (
             !error && <div className="text-center text-slate-400 py-6 text-sm">لا يوجد سجل تاريخي.{fetchFailedEngines(report?.engines).length > 0 && <span className="block text-[11px] mt-1">{FETCH_FAILED_LABEL}</span>}</div>
+        )}
+        {report?.leads && report.leads.length > 0 && (
+            <details className="mt-3">
+                <summary className="cursor-pointer text-xs font-bold text-slate-500 select-none">
+                    نتائج غير مؤكدة ({report.leads.length}) — صفحات أعادتها المحركات ولم تثبت فيها الصورة أو التاريخ
+                </summary>
+                <div className="mt-2 space-y-1.5">
+                    {report.leads.map((item, idx) => (
+                        <a key={idx} href={item.link} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-2 p-2 rounded-lg border border-dashed border-slate-200 bg-white hover:border-slate-300 transition-all">
+                            <Thumb item={item} size="w-9 h-9" />
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                    <DatePill item={item} />
+                                    <PlatformPill url={item.link} />
+                                    <EvidencePills item={item} />
+                                </div>
+                                <p className="text-[10px] text-slate-400 break-all line-clamp-1" dir="ltr">{item.link}</p>
+                            </div>
+                        </a>
+                    ))}
+                </div>
+            </details>
         )}
     </GlassCard>
     );

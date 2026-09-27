@@ -45,11 +45,13 @@ class ImageEvidence:
     inliers: int = 0
     checked: int = 0
     note: str = None
+    frame: int = None                # which query frame matched (video), 0 = the primary image
 
     def brief(self):
         return {'level': self.level, 'kind': self.kind, 'matched_url': self.matched_url,
                 'size': [self.width, self.height] if self.width else None,
-                'phash': self.phash, 'inliers': self.inliers, 'checked': self.checked, 'note': self.note}
+                'phash': self.phash, 'inliers': self.inliers, 'checked': self.checked,
+                'note': self.note, 'frame': self.frame}
 
 
 def _fetch_image(url, timeout=(5, 12)):
@@ -66,15 +68,20 @@ def _fetch_image(url, timeout=(5, 12)):
 
 
 def _compare(sigs, pil):
-    """(kind|None, phash_distance, geometry dict|None)"""
-    dists = [d for d in (_hash_distance(s, pil) for s in sigs) if d is not None]
-    dist = min(dists) if dists else None
+    """(kind|None, phash_distance, geometry dict|None, frame index|None)"""
+    per = [(_hash_distance(s, pil), i) for i, s in enumerate(sigs)]
+    per = [(d, i) for d, i in per if d is not None]
+    dist, frame = min(per) if per else (None, None)
     if dist is not None and dist <= PHASH_SAME:
-        return 'exact', dist, None
-    g = geometric_verify.same_scene(sigs, pil)
-    if g.get('same_scene'):
-        return 'variant', dist, g
-    return None, dist, g
+        return 'exact', dist, None, frame
+    best = None
+    for i, s in enumerate(sigs):
+        g = geometric_verify.same_scene([s], pil)
+        if g.get('same_scene'):
+            return 'variant', dist, g, i
+        if best is None or (g.get('inliers') or 0) > (best[0].get('inliers') or 0):
+            best = (g, i)
+    return None, dist, (best[0] if best else None), None
 
 
 def platform_media(url):
@@ -176,11 +183,12 @@ def verify_page(url, sigs, *, engine_thumbs=(), timeout=(5, 10), fetch=True):
             except Exception:
                 continue
             ev.checked += 1
-            kind, dist, g = _compare(sigs, pil)
+            kind, dist, g, frame = _compare(sigs, pil)
             if kind:
                 ev.level, ev.kind, ev.matched_url = level, kind, img_url
                 ev.width, ev.height, ev.phash = pil.size[0], pil.size[1], dist
                 ev.inliers = int((g or {}).get('inliers') or 0)
+                ev.frame = frame
                 out['matched_pil'] = pil
                 return out
             if g and g.get('same_scene') is False:
@@ -193,11 +201,12 @@ def verify_page(url, sigs, *, engine_thumbs=(), timeout=(5, 10), fetch=True):
             except Exception:
                 continue
             ev.checked += 1
-            kind, dist, g = _compare(sigs, pil)
+            kind, dist, g, frame = _compare(sigs, pil)
             if kind:
                 ev.level, ev.kind, ev.matched_url = 'engine_claim', kind, img_url
                 ev.width, ev.height, ev.phash = pil.size[0], pil.size[1], dist
                 ev.inliers = int((g or {}).get('inliers') or 0)
+                ev.frame = frame
                 ev.note = 'page not checkable' if not page_images else 'page images not judged'
                 return out
     return out

@@ -125,174 +125,63 @@ def run_xai_investigation(image_url, user_id=None):
 @_with_app_context
 def run_direct_search(query=None, image_url=None, user_id=None,
                       image_hash=None, image_phash=None, extra_image_urls=None):
-    """Timeline search as a background job (was the blocking /api/direct-search).
+    """Origin search as a background job.
 
-    Image mode runs the Origin Engine (multi-engine harvest, dated + visually
-    verified sightings, bounded expansion). If the engine cannot run at all
-    it degrades to the legacy path: Zenserp with one retry, then the Google
-    Lens harvest — so the search ALWAYS returns something. Text mode is
-    Zenserp only.
+    Image mode: Origin v2 (origin/investigate.py) — copies, engines, page-level
+    verification, one eligibility rule. Text mode: SerpAPI Google results.
+    Every search persists a Search + SearchResult rows.
     """
-    from urllib.parse import urlparse
-    from providers.zenserp import reverse_image_search, text_search
-    from services.search_service import (build_direct_search_timeline,
-                                         scrape_reverse_search,
-                                         persist_search, parse_iso_datetime)
+    from services.search_service import persist_search, parse_iso_datetime
 
-    image_mode = bool(image_url)
-    if image_mode:
-        origin = _run_origin_engine(image_url, extra_image_urls)
-        if origin is not None:
-            results = [{
-                'url': i.get('link'),
-                'title': i.get('title'),
-                'snippet': None,
-                'thumbnail': i.get('thumbnail'),
-                'domain': i.get('source'),
-                'published_at': parse_iso_datetime(i.get('published_at')),
-                'confidence': i.get('confidence'),
-            } for i in origin['timeline']]
-            raw = {k: origin.get(k) for k in
-                   ('timeline', 'engine', 'first_seen', 'narrative',
-                    'engines', 'stats', 'rounds', 'note', 'agent',
-                    'earlier_hints', 'scenes', 'video_summary',
-                    'forensics', 'internal_sightings',
-                    # v2 fields
-                    'version', 'first_seen_exact', 'version_note', 'leads',
-                    'copies', 'budget', 'identity', 'screenshot')}
-            origin['search_id'] = persist_search(
-                user_id, 'direct', query=None, image_url=image_url,
-                image_hash=image_hash, image_phash=image_phash,
-                results=results, raw_response=raw)
-            _progress('اكتمل البحث')
-            return {'status': 200, 'payload': origin}
-        _progress('تعذّر تشغيل محرك المصدر — التبديل إلى البحث التقليدي...')
-
-    engine = 'zenserp'
-    zenserp_data = None
-    last_error = None
-
-    _progress('جاري البحث في محركات البحث...')
-    for attempt in (1, 2):
-        try:
-            if image_mode:
-                resp = reverse_image_search(image_url, gl='us', hl='en')
-            else:
-                resp = text_search(query, num=40, gl='sa', hl='ar')
-            if resp.status_code == 200:
-                zenserp_data = resp.json()
-                break
-            last_error = f'Zenserp API Error: {resp.status_code}'
-            logger.warning('%s (attempt %d): %s', last_error, attempt,
-                           resp.text[:200])
-        except requests.RequestException as e:
-            last_error = f'Zenserp request failed: {e}'
-            logger.warning('%s (attempt %d)', last_error, attempt)
-        if attempt == 1:
-            _progress('محرك البحث بطيء الاستجابة — محاولة ثانية...')
-
-    if zenserp_data is not None:
-        _progress('جاري تحليل النتائج وترجمتها...')
-        timeline = build_direct_search_timeline(zenserp_data, image_mode)
-    elif image_mode:
-        # Zenserp is down — the reliable Lens harvest becomes the timeline
-        _progress('التبديل إلى Google Lens...')
-        engine = 'google_lens_fallback'
-        lens = scrape_reverse_search(image_url)
-        timeline = [{
-            'title': m.get('title') or None,
-            'link': m.get('link'),
-            'snippet': None,
-            'thumbnail': m.get('thumbnail'),
-            'date_text': None,
-            'timestamp': None,
-            'source': urlparse(m['link']).netloc if m.get('link') else 'Web',
-            'type': m.get('match_type', 'similar'),
-        } for m in lens.get('matches', [])]
-        if not timeline and (lens.get('error') or not lens.get('success')):
-            # both engines genuinely down — say so instead of an empty 200
+    if image_url:
+        from origin.investigate import investigate
+        payload = investigate(image_url, progress=_progress,
+                              extra_frame_urls=extra_image_urls)
+        if not payload.get('success'):
             return {'status': 502, 'payload': {
-                'error': last_error or 'Search engines unavailable',
-                'success': False}}
-    else:
-        return {'status': 502, 'payload': {
-            'error': last_error or 'Zenserp API Error', 'success': False}}
+                'error': payload.get('note') or 'origin engine unavailable', 'success': False}}
+        results = [{
+            'url': i.get('link'),
+            'title': i.get('title'),
+            'snippet': None,
+            'thumbnail': i.get('thumbnail'),
+            'domain': i.get('source'),
+            'published_at': parse_iso_datetime(i.get('published_at')),
+            'confidence': i.get('confidence'),
+        } for i in payload['timeline']]
+        raw = {k: payload.get(k) for k in
+               ('timeline', 'engine', 'version', 'first_seen', 'first_seen_exact',
+                'version_note', 'leads', 'copies', 'engines', 'budget', 'stats',
+                'rounds', 'note', 'identity', 'scenes', 'screenshot')}
+        payload['search_id'] = persist_search(
+            user_id, 'direct', query=None, image_url=image_url,
+            image_hash=image_hash, image_phash=image_phash,
+            results=results, raw_response=raw)
+        _progress('اكتمل البحث')
+        return {'status': 200, 'payload': payload}
 
-    # Tier-1 visual post-filter (feature flag)
-    visual_summary = None
-    from services.embedding_service import visual_verify_enabled
-    if image_mode and timeline and visual_verify_enabled():
-        from services.visual_verify import apply_visual_post_filter
-        _progress('جاري التحقق البصري من النتائج...')
-        timeline, visual_summary = apply_visual_post_filter(
-            timeline, image_url, url_field='link')
-
-    results = [{
-        'url': i.get('link'),
-        'title': i.get('title'),
-        'snippet': i.get('snippet'),
-        'thumbnail': i.get('thumbnail'),
-        'domain': i.get('source'),
-        'published_at': parse_iso_datetime(i.get('timestamp')),
-        'confidence': None,
-    } for i in timeline]
-    search_id = persist_search(
-        user_id, 'direct', query=query, image_url=image_url,
-        image_hash=image_hash, image_phash=image_phash, results=results,
-        raw_response={'timeline': timeline, 'engine': engine})
-
-    _progress('اكتمل البحث')
-    payload = {
-        'success': True,
-        'timeline': timeline,
-        'total': len(timeline),
-        'search_id': search_id,
-        'engine': engine,
-        'raw': {}
-    }
-    if visual_summary is not None:
-        payload['visual_verification'] = visual_summary
-    return {'status': 200, 'payload': payload}
-
-
-def _run_origin_engine(image_url, extra_image_urls=None):
-    """investigate_origin() -> page payload, or None when the engine could
-    not run (missing key, unexpected crash). Never raises.
-    extra_image_urls: more frames of the same video (video mode)."""
-    from services.origin_engine import investigate_origin, to_search_payload
-    from services.origin_agent import investigate as agent_investigate
-    from providers import deepseek
-    use_agent = (os.environ.get('ORIGIN_AGENT', 'true').lower() == 'true'
-                 and deepseek.configured())
-    use_v2 = os.environ.get('ORIGIN_V2', 'false').lower() == 'true'
+    # text mode
+    from providers.serpapi import web_search
+    from urllib.parse import urlparse
+    _progress('جاري البحث...')
     try:
-        if use_v2:
-            from origin.investigate import investigate as v2_investigate
-            report = v2_investigate(image_url, progress=_progress,
-                                    extra_frame_urls=extra_image_urls)
-            if report.get('success'):
-                return report                     # already payload-shaped
-            logger.warning('origin v2 unavailable (%s); using v1', report.get('note'))
-        if use_agent:
-            report = agent_investigate(image_url, progress=_progress,
-                                       extra_frame_urls=extra_image_urls)
-        else:
-            report = investigate_origin(image_url, progress=_progress,
-                                        extra_frame_urls=extra_image_urls)
-    except Exception:
-        logger.exception('origin engine crashed; falling back')
-        return None
-    if not report.get('success'):
-        logger.warning('origin engine unavailable: %s', report.get('note'))
-        return None
-    engines = report.get('engines') or {}
-    broken = [n for n, e in engines.items()
-              if not e.get('ok') and e.get('note') != 'not configured']
-    if broken and not report.get('timeline'):
-        logger.warning('origin engine found nothing and %s failed; '
-                       'falling back to legacy search', broken)
-        return None
-    return to_search_payload(report)
+        rows = web_search(query or '', hl='ar', gl='sa', num=20)
+    except Exception as e:
+        logger.warning('text search failed: %s', e)
+        return {'status': 502, 'payload': {'error': f'search failed: {e}', 'success': False}}
+    timeline = [{
+        'title': r.get('title') or None, 'link': r['link'], 'snippet': r.get('snippet'),
+        'thumbnail': None, 'date_text': r.get('date'), 'timestamp': None,
+        'source': urlparse(r['link']).netloc, 'type': 'organic',
+    } for r in rows]
+    results = [{'url': i['link'], 'title': i['title'], 'snippet': i['snippet'], 'thumbnail': None,
+                'domain': i['source'], 'published_at': None, 'confidence': None} for i in timeline]
+    search_id = persist_search(user_id, 'direct', query=query, image_url=None,
+                               image_hash=image_hash, image_phash=image_phash,
+                               results=results, raw_response={'timeline': timeline, 'engine': 'google_text'})
+    _progress('اكتمل البحث')
+    return {'status': 200, 'payload': {'success': True, 'timeline': timeline, 'total': len(timeline),
+                                       'search_id': search_id, 'engine': 'google_text', 'raw': {}}}
 
 
 @_with_app_context

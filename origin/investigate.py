@@ -32,6 +32,7 @@ VERIFY_TIME_R1 = 45       # seconds, hard cap per verification round
 VERIFY_TIME_RN = 30
 PRESCREEN_TIME = 15
 MAX_ROUNDS = 3
+MAX_FRAMES = 7            # extra video frames searched (each = one Lens credit)
 NEW_COPIES_PER_ROUND = 2
 PER_DOMAIN = 3
 TEXT_RESERVE = 3          # credits kept for the identification track's text queries
@@ -164,6 +165,29 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
         return _unavailable('no searchable copy', budget)
     small = next((c for c in cs.copies if c.source == 'small'), None)
 
+    # video: every other keyframe is a copy of its own with its own signature
+    frame_copies = []
+    if extra_frame_urls:
+        progress('تجهيز إطارات الفيديو...')
+        for f_url in list(extra_frame_urls)[:MAX_FRAMES]:
+            f_data = _download(f_url)
+            if not f_data:
+                continue
+            try:
+                from PIL import Image
+                import io as _io
+                f_pil = Image.open(_io.BytesIO(f_data)).convert('RGB')
+            except Exception:
+                continue
+            f_sig = build_query_signature(f_pil)
+            if not f_sig:
+                continue
+            inv.sigs.append(f_sig)
+            c = cs.add(copies_mod.public_url_for_hosted(f_url), f_pil, 'frame')
+            if c is not None and c.source == 'frame':
+                frame_copies.append(c)
+        inv.extras['frames'] = [c.url for c in frame_copies]
+
     # 1. round 1
     progress('البحث في المحركات (Lens, Yandex, TinEye)...')
     tasks = [
@@ -175,6 +199,9 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
     ]
     for name in ('lens_exact_en', 'lens_exact_ar', 'lens_visual', 'yandex', 'tineye'):
         cs.mark(primary, name)
+    for c in frame_copies:                      # one Lens exact per extra frame
+        cs.mark(c, 'lens_exact_en')
+        tasks.append((f'lens_exact_en@frame{c.id}', (lambda c=c: engines.lens_exact(c.url, 'en', 'us', c.id)), engines.LENS_CREDITS))
     answers = inv.run(tasks, timeout_s=70)
     refused = (answers.get('lens_visual') and answers['lens_visual'].status == 'refused')
     if refused and small is not None and budget.time_left() > 60:

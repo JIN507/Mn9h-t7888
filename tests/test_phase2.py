@@ -114,35 +114,44 @@ def _finished_job(client, response):
 
 
 @responses.activate
-def test_direct_search_cache_by_hash(client, app):
-    responses.add(responses.GET, 'https://app.zenserp.com/api/v2/search',
-                  json={'reverse_image_results': {
-                      'similar_images': [{'title': 'S', 'url': 'https://s.example'}],
-                      'pages_with_matching_images': [], 'organic': []}},
-                  status=200)
+
+def _fake_origin_payload():
+    return {'success': True, 'engine': 'origin_engine', 'version': 2,
+            'first_seen': {'url': 'https://s.example', 'link': 'https://s.example', 'title': 'S', 'thumbnail': None,
+                           'source': 's.example', 'published_at': '2024-01-01T00:00:00Z', 'confidence': 0.9,
+                           'image_level': 'page', 'date_level': 'structured', 'visual': {'verdict': 'confirmed'}, 'evidence': []},
+            'first_seen_exact': None, 'version_note': None,
+            'timeline': [{'link': 'https://s.example', 'title': 'S', 'thumbnail': None, 'source': 's.example',
+                          'published_at': '2024-01-01T00:00:00Z', 'confidence': 0.9, 'type': 'similar',
+                          'visual': {'verdict': 'confirmed'}, 'evidence': []}],
+            'total': 1, 'leads': [], 'copies': [], 'engines': {}, 'budget': {'credits': 4}, 'stats': {'checked': 1},
+            'rounds': [], 'note': None, 'identity': None, 'scenes': [], 'screenshot': False}
+
+
+def test_direct_search_cache_by_hash(client, app, monkeypatch):
+    import origin.investigate as inv_mod
+    calls = []
+    monkeypatch.setattr(inv_mod, 'investigate',
+                        lambda url, progress=None, extra_frame_urls=None: calls.append(url) or _fake_origin_payload())
 
     fake_hash = 'f' * 64
     r1 = client.post('/api/direct-search', json={
         'image_url': HOSTED_IMG, 'image_hash': fake_hash})
     d1 = _finished_job(client, r1)['payload']
-    assert d1['success'] is True and d1.get('search_id')
+    assert d1['success'] is True and d1.get('search_id') and len(calls) == 1
 
-    # repeat with same hash -> served from DB, no Zenserp call
+    # repeat with same hash -> served from DB, no investigation
     d2 = client.post('/api/direct-search', json={
         'image_url': HOSTED_IMG, 'image_hash': fake_hash}).get_json()
-    assert d2['cached'] is True
+    assert d2['cached'] is True and len(calls) == 1
     assert d2['timeline'] == d1['timeline']
 
-    # rerun flag bypasses cache (needs the mock again)
-    responses.add(responses.GET, 'https://app.zenserp.com/api/v2/search',
-                  json={'reverse_image_results': {
-                      'similar_images': [], 'pages_with_matching_images': [],
-                      'organic': []}}, status=200)
+    # rerun flag bypasses cache
     r3 = client.post('/api/direct-search', json={
         'image_url': HOSTED_IMG, 'image_hash': fake_hash,
         'rerun': True})
     d3 = _finished_job(client, r3)['payload']
-    assert 'cached' not in d3
+    assert 'cached' not in d3 and len(calls) == 2
 
 
 @responses.activate

@@ -414,3 +414,52 @@ def test_round_one_leaves_pages_for_later_rounds():
     assert b.spent_pages == 20 and b.skipped[0]['step'] == 'verify round 1' and 'not fetched' in b.skipped[0]['reason']
     inv.verify_many(cands[:25], 4, time_cap=5)
     assert b.spent_pages == 45                         # later rounds still get their pages
+
+
+# ------------------------------------------------------------ phase 3: video
+
+@responses.activate
+def test_verify_reports_which_frame_matched():
+    f0, f1 = _textured(31), _textured(32)
+    sigs = [_sig(f0), _sig(f1)]
+    responses.add(responses.GET, 'https://page.example/v', body='<html><img src="https://page.example/f1.jpg"></html>', content_type='text/html')
+    responses.add(responses.GET, 'https://page.example/f1.jpg', body=_jpeg(f1.crop((30, 20, 600, 460))), content_type='image/jpeg')
+    v = verify.verify_page('https://page.example/v', sigs)
+    assert v['image'].level == 'page' and v['image'].frame == 1
+
+
+def test_video_investigation_scenes(monkeypatch):
+    from origin import investigate as inv_mod, identify
+    f0, f1 = _textured(33, (1000, 700)), _textured(34, (1000, 700))
+    data = {'https://r2/f0.jpg': _jpeg(f0), 'https://r2/f1.jpg': _jpeg(f1)}
+    monkeypatch.setenv('SERPAPI_API_KEY', 'k')
+    monkeypatch.setenv('SCREENSHOT_CROP', 'false')
+    monkeypatch.setattr(inv_mod, '_download', lambda url: data[url.split('?')[0]])
+    monkeypatch.setattr(cp, 'host_bytes', lambda d, hint='x': f'https://pub.example/{hint}.jpg')
+    monkeypatch.setattr(cp, 'public_url_for_hosted', lambda u: u.split('?')[0].replace('r2/', 'pub.example/'))
+    searched = []
+    monkeypatch.setattr(engines, 'lens_exact', lambda url, hl='en', country='us', copy_id=None, no_cache=False:
+                        searched.append((url, hl)) or engines.EngineAnswer(f'lens_exact_{hl}', 'results', [
+                            {'url': 'https://x.com/a/status/1814337329387175999' if 'f0' in url else 'https://x.com/b/status/1814515949699322069',
+                             'engine': 'lens', 'match': 'exact', 'copy_id': copy_id}], 1, copy_id=copy_id))
+    monkeypatch.setattr(engines, 'lens_visual', lambda url, hl='en', country='us', copy_id=None, no_cache=False: engines.EngineAnswer('lens_visual', 'empty', [], 1, copy_id=copy_id))
+    monkeypatch.setattr(engines, 'yandex', lambda url, copy_id=None: engines.EngineAnswer('yandex', 'empty', [], 1, copy_id=copy_id))
+    monkeypatch.setattr(engines, 'tineye', lambda url, copy_id=None: engines.EngineAnswer('tineye', 'skipped', note='not configured'))
+    monkeypatch.setattr(identify, 'describe', lambda b: '')
+    monkeypatch.setattr(identify, 'identify', lambda d, t, c: None)
+
+    def fake_verify(url, sigs, engine_thumbs=(), **k):
+        v = {'url': url, 'image': verify.ImageEvidence(), 'html': '<html></html>', 'headers': None, 'title': 't',
+             'caption': None, 'created_at': None, 'extra_dates': [], 'tweet': None, 'matched_pil': None, 'fetch_error': False}
+        frame = 0 if '/a/' in url else 1
+        v['image'] = verify.ImageEvidence(level='platform', kind='exact', matched_url=f'https://pbs.example/{frame}.jpg', width=1000, height=700, frame=frame)
+        v['tweet'] = {'created_at': '2024-07-19T16:31:42.000Z' if frame == 0 else '2024-07-20T04:21:26.000Z', 'text': 't'}
+        return v
+    monkeypatch.setattr(verify, 'verify_page', fake_verify)
+
+    payload = inv_mod.investigate('https://r2/f0.jpg?X=1', progress=lambda m: None, extra_frame_urls=['https://r2/f1.jpg?X=1'])
+    assert any('f1' in u for u, hl in searched)                                     # the second frame got its own Lens search
+    assert payload['first_seen']['link'] == 'https://x.com/a/status/1814337329387175999'
+    assert [s['frame'] for s in payload['scenes']] == [1, 2]
+    assert payload['scenes'][1]['first_seen']['link'] == 'https://x.com/b/status/1814515949699322069'
+    assert payload['stats']['frames'] == 2 and payload['budget']['credits'] <= 20

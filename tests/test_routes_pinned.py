@@ -229,40 +229,54 @@ def test_upload_returns_engine_links(client, png_bytes):
 
 
 @responses.activate
-def test_direct_search_image_mode_ignores_organic(client):
-    responses.add(
-        responses.GET, 'https://app.zenserp.com/api/v2/search',
-        json={'reverse_image_results': {
-            'organic': [{'title': 'noise', 'url': 'https://noise.example'}],
-            'similar_images': [
-                {'title': 'S', 'url': 'https://s.example', 'description': 'd'}],
-            'pages_with_matching_images': [
-                {'title': 'P', 'url': 'https://p.example', 'description': 'd'}],
-        }}, status=200)
 
+def _fake_origin_payload():
+    return {'success': True, 'engine': 'origin_engine', 'version': 2,
+            'first_seen': {'url': 'https://s.example', 'link': 'https://s.example', 'title': 'S', 'thumbnail': None,
+                           'source': 's.example', 'published_at': '2024-01-01T00:00:00Z', 'confidence': 0.9,
+                           'image_level': 'page', 'date_level': 'structured', 'visual': {'verdict': 'confirmed'}, 'evidence': []},
+            'first_seen_exact': None, 'version_note': None,
+            'timeline': [{'link': 'https://s.example', 'title': 'S', 'thumbnail': None, 'source': 's.example',
+                          'published_at': '2024-01-01T00:00:00Z', 'confidence': 0.9, 'type': 'similar',
+                          'visual': {'verdict': 'confirmed'}, 'evidence': []}],
+            'total': 1, 'leads': [], 'copies': [], 'engines': {}, 'budget': {'credits': 4}, 'stats': {'checked': 1},
+            'rounds': [], 'note': None, 'identity': None, 'scenes': [], 'screenshot': False}
+
+
+def test_direct_search_image_mode_runs_origin_v2(client, monkeypatch):
+    import origin.investigate as inv_mod
+    monkeypatch.setattr(inv_mod, 'investigate',
+                        lambda url, progress=None, extra_frame_urls=None: _fake_origin_payload())
     r = client.post('/api/direct-search', json={'image_url': HOSTED_IMG})
     d = _finished_job(client, r)['payload']
-    assert d['success'] is True
-    assert d['engine'] == 'zenserp'
-    got = {i['link']: i['type'] for i in d['timeline']}
-    assert got == {'https://s.example': 'similar',
-                   'https://p.example': 'page_match'}
+    assert d['success'] is True and d['engine'] == 'origin_engine' and d['version'] == 2
+    assert d['first_seen']['link'] == 'https://s.example' and d.get('search_id')
+
+
+def test_direct_search_image_mode_reports_engine_failure(client, monkeypatch):
+    import origin.investigate as inv_mod
+    monkeypatch.setattr(inv_mod, 'investigate',
+                        lambda url, progress=None, extra_frame_urls=None: {'success': False, 'note': 'SerpAPI key not configured'})
+    r = client.post('/api/direct-search', json={'image_url': HOSTED_IMG})
+    res = _finished_job(client, r)
+    assert res['status'] == 502 and 'SerpAPI' in res['payload']['error']
 
 
 @responses.activate
-def test_direct_search_text_mode_uses_organic(client):
+def test_direct_search_text_mode_uses_google_organic(client):
     responses.add(
-        responses.GET, 'https://app.zenserp.com/api/v2/search',
-        json={'organic': [
-            {'title': 'T', 'url': 'https://t.example', 'description': 'x'}]},
+        responses.GET, 'https://serpapi.com/search.json',
+        json={'organic_results': [
+            {'title': 'T', 'link': 'https://t.example', 'snippet': 'x', 'date': 'Jan 1, 2024'}]},
         status=200)
 
     r = client.post('/api/direct-search', json={'query': 'اختبار'})
     d = _finished_job(client, r)['payload']
-    assert d['success'] is True
+    assert d['success'] is True and d['engine'] == 'google_text'
     assert d['total'] == 1
     assert d['timeline'][0]['type'] == 'organic'
     assert d['timeline'][0]['link'] == 'https://t.example'
+    assert 'engine=google' in responses.calls[0].request.url
 
 
 @responses.activate

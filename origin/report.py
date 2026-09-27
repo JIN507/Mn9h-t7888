@@ -47,7 +47,7 @@ def public_item(s, is_first=False):
         'providers': s.get('engines') or [],
         'copy_ids': sorted(s.get('copy_ids') or []),
         'origin_round': s.get('round', 0),
-        'frames': s.get('frames') or [],
+        'frames': ([img.frame + 1] if img.frame is not None else []),
         'is_listing': urls.is_listing(s['url']),
     }
 
@@ -64,6 +64,14 @@ def build(sightings, *, copies, engines, budget, extras, upload_phash=None, note
                             'أول الظهور أعلاه هو أصل الصورة نفسها.')
             if exact and exact[0] is not origin:
                 exact_first = exact[0]
+    scenes = []
+    if extras.get('frames'):
+        by_frame = {}
+        for s in cands:
+            f = s['image'].frame
+            if f is not None and f not in by_frame:
+                by_frame[f] = s
+        scenes = [{'frame': f + 1, 'first_seen': public_item(s)} for f, s in sorted(by_frame.items())]
     dated = sorted([s for s in sightings if s['date'].when and s['image'].level != 'none'], key=sort_key)
     undated = [s for s in sightings if not s['date'].when and s['image'].level != 'none']
     leads = [s for s in dated + undated if not eligible(s)]
@@ -99,7 +107,7 @@ def build(sightings, *, copies, engines, budget, extras, upload_phash=None, note
         'identity': extras.get('identity'),
         'agent': None,
         'earlier_hints': [],
-        'scenes': extras.get('scenes') or [],
+        'scenes': scenes,
         'video_summary': None,
         'forensics': None,
         'internal_sightings': [],

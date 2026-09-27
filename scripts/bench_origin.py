@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--engine', choices=['v1', 'v2'], default='v2')
+    ap.add_argument('--engine', choices=['v2'], default='v2')
     ap.add_argument('--case', action='append', help='case id (repeatable)')
     ap.add_argument('--check', action='store_true', help='exit 1 on regression vs baseline_v1.json')
     args = ap.parse_args()
@@ -23,10 +23,7 @@ def main():
         cases = [c for c in cases if c['id'] in set(args.case)]
     baseline = runner.load_baseline()
 
-    if args.engine == 'v1':
-        from services.origin_agent import investigate as _inv
-    else:
-        from origin.investigate import investigate as _inv
+    from origin.investigate import investigate as _inv
 
     results = {}
     with app.app_context():

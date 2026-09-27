@@ -61,8 +61,10 @@ class CopySet:
         with self._lock:
             for c in self.copies:
                 if c.phash - ph <= DEDUPE_PHASH:
-                    if c.source in ('upload', 'small', 'screenshot') and source in ('page', 'platform'):
+                    if c.source in ('upload', 'small', 'screenshot', 'frame') and source in ('page', 'platform'):
                         continue      # a page's own file is worth searching even if it hashes like the upload
+                    if source == 'frame' and c.source in ('upload', 'frame'):
+                        return c      # a near-identical keyframe: not a new scene
                     # keep the larger URL for the same picture
                     if w * h > c.area and source in ('page', 'platform') and c.source in ('page', 'platform'):
                         c.url, c.width, c.height, c.found_on = url, w, h, found_on
@@ -77,7 +79,7 @@ class CopySet:
         with self._lock:
             pool = [c for c in self.copies if engine not in c.searched
                     and (min(c.width, c.height) >= MIN_COPY_PX
-                         or c.source in ('upload', 'small', 'screenshot'))]
+                         or c.source in ('upload', 'small', 'screenshot', 'frame'))]
         pool.sort(key=lambda c: (0 if any(p in urlsplit(c.url).hostname or '' for p in prefer) else 1, -c.area))
         return pool[:limit] if limit else pool
 

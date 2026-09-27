@@ -64,14 +64,32 @@ def test_run_case_uses_investigate_and_never_raises(monkeypatch):
     assert r['verdict'] == 'error' and 'boom' in r['error']
 
 
-def test_job_flag_routes_to_v2_and_falls_back_while_unbuilt(monkeypatch):
-    from tasks import jobs
-    calls = []
-    monkeypatch.setenv('ORIGIN_V2', 'true')
-    monkeypatch.setenv('ORIGIN_AGENT', 'false')
-    import services.origin_engine as oe
-    monkeypatch.setattr(oe, 'investigate_origin',
-                        lambda url, progress=None, extra_frame_urls=None: calls.append('v1') or
-                        {'success': True, 'timeline': [], 'engines': {}, 'first_seen': None})
-    out = jobs._run_origin_engine('https://img.example/q.jpg')
-    assert calls == ['v1'] and out is not None and out['engine'] == 'origin_engine'
+def test_direct_search_route_runs_origin_v2_and_persists(client, monkeypatch):
+    """/api/direct-search image mode -> job -> Origin v2 payload, persisted with its v2 fields."""
+    import origin.investigate as inv_mod
+    fake = {'success': True, 'engine': 'origin_engine', 'version': 2,
+            'first_seen': {'url': 'https://x.com/a/status/1', 'link': 'https://x.com/a/status/1', 'title': 't',
+                           'published_at': '2024-07-19T16:31:42Z', 'confidence': 0.98, 'thumbnail': None,
+                           'source': 'x.com', 'image_level': 'platform', 'date_level': 'platform_id',
+                           'visual': {'verdict': 'confirmed'}, 'evidence': []},
+            'first_seen_exact': None, 'version_note': None,
+            'timeline': [{'link': 'https://x.com/a/status/1', 'title': 't', 'thumbnail': None, 'source': 'x.com',
+                          'published_at': '2024-07-19T16:31:42Z', 'confidence': 0.98, 'visual': {'verdict': 'confirmed'},
+                          'type': 'exact', 'evidence': []}],
+            'total': 1, 'leads': [], 'copies': [], 'engines': {'lens_exact_en': {'status': 'results', 'count': 3, 'credits': 1}},
+            'budget': {'credits': 5}, 'stats': {'checked': 1, 'visually_confirmed': 1}, 'rounds': [], 'note': None,
+            'identity': {'event_ar': 'حدث', 'label': 'استنتاج'}, 'scenes': [], 'screenshot': False}
+    monkeypatch.setattr(inv_mod, 'investigate', lambda url, progress=None, extra_frame_urls=None: dict(fake))
+    r = client.post('/api/direct-search', json={'image_url': 'https://img.example/q.jpg', 'image_hash': 'h' * 64})
+    assert r.status_code == 202
+    job_id = r.get_json()['job_id']
+    st = client.get(f'/api/jobs/{job_id}').get_json()
+    assert st['status'] == 'finished'
+    payload = st['result']['payload']
+    assert payload['engine'] == 'origin_engine' and payload['version'] == 2
+    assert payload['first_seen']['link'] == 'https://x.com/a/status/1' and payload['search_id']
+    assert payload['identity']['label'] == 'استنتاج' and payload['budget']['credits'] == 5
+    # a second search of the same hash is served from the stored report with the v2 fields intact
+    r2 = client.post('/api/direct-search', json={'image_url': 'https://img.example/q.jpg', 'image_hash': 'h' * 64})
+    body = r2.get_json()
+    assert body.get('cached') is True and body['version'] == 2 and body['identity']['label'] == 'استنتاج'

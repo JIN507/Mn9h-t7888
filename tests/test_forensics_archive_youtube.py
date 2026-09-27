@@ -98,22 +98,3 @@ def test_youtube_search_returns_dated_leads(monkeypatch):
     assert 'publishedBefore=2026-03-09T00%3A00%3A00Z' in url and 'relevanceLanguage=ar' in url
     monkeypatch.delenv('YOUTUBE_API_KEY')
     assert youtube.configured() is False and youtube.search_videos('x') == []
-
-
-def test_inspect_candidate_uses_api_date(monkeypatch):
-    from services import origin_engine as oe
-    monkeypatch.setattr(oe, 'fetch_page', lambda url, timeout=None: None)
-    monkeypatch.setattr(oe.de, 'platform_fetch_date', lambda url, timeout=None: ([], None))
-    monkeypatch.setattr(oe, 'verify_html', lambda html, url, sig, **kw: {
-        'verdict': 'confirmed', 'match_kind': 'exact', 'similarity': None, 'phash_distance': 2,
-        'matched_image_url': 'https://i.ytimg.com/vi/IZ0ldhWOR1A/hqdefault.jpg', 'matched_size': (480, 360),
-        'matched_from': 'engine', 'checked_images': 1})
-    monkeypatch.setattr(oe, '_index_sighting', lambda blob, url: None)
-    cand = {'url': 'https://www.youtube.com/watch?v=IZ0ldhWOR1A', 'canonical': 'https://youtube.com/watch?v=IZ0ldhWOR1A',
-            'domain': 'youtube.com', 'match_type': 'organic', 'providers': ['youtube_api'],
-            'engine_images': ['https://i.ytimg.com/vi/IZ0ldhWOR1A/hqdefault.jpg'], 'thumbnail': None,
-            'crawl_date': None, 'is_image': False, 'api_date': '2026-03-07T18:33:42Z',
-            'api_date_source': 'platform:youtube_api'}
-    item = oe.inspect_candidate(cand, {'phash': 'p'}, use_wayback=False)
-    assert item['published_at'] == '2026-03-07T18:33:42Z'
-    assert item['evidence'][0]['source'] == 'platform:youtube_api' and item['confidence'] >= 0.95

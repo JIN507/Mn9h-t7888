@@ -39,39 +39,6 @@ def test_detects_photo_band_in_screenshot_only():
     assert sc.detect_photo_region(b'not an image') is None
 
 
-def test_engine_searches_the_crop_and_keeps_screenshot_signature(monkeypatch):
-    from services import origin_engine as oe
-    calls = {'lens': [], 'sig': None}
-
-    def lens(image_url, lens_type, hl='ar', country='sa', no_cache=False):
-        calls['lens'].append((image_url, lens_type))
-        return []
-    monkeypatch.setattr(oe, 'lens_matches', lens)
-    monkeypatch.setattr(oe, 'LENS_RETRY_DELAY_S', 0)
-    monkeypatch.setattr(oe.vision_provider, 'configured', lambda: False)
-    monkeypatch.setattr(oe.tineye_provider, 'configured', lambda: False)
-    monkeypatch.setattr(oe, '_browser_engine', lambda name: None)
-    monkeypatch.setattr(oe.yandex_provider, 'reverse_image', lambda u: [])
-    monkeypatch.setattr(oe, 'reverse_image_pages', lambda u, **k: [])
-    monkeypatch.setattr(oe.wayback_provider, 'archive_url', lambda u, **k: {'url': None, 'status': 'failed'})
-    monkeypatch.setattr(oe, '_download_bytes', lambda u, timeout=None: b'bytes:' + u.encode())
-    monkeypatch.setattr(oe, 'screenshot_crop_url',
-                        lambda data: (b'cropbytes', 'https://host.example/crop.jpg', [0, 200, 400, 600]))
-
-    def sigs(primary_bytes, extras):
-        calls['sig'] = (primary_bytes, list(extras or []))
-        return {'phash': 'p'}
-    monkeypatch.setattr(oe, 'frame_signatures', sigs)
-    monkeypatch.setenv('SERPAPI_API_KEY', 'test')
-    monkeypatch.setenv('SEARCH_COPY', 'none')
-    report = oe.investigate_origin('https://r2.example/shot.jpg')
-    searched = {u for u, t in calls['lens'] if t == 'exact_matches'}
-    assert 'https://host.example/crop.jpg' in searched            # engines got the photo
-    assert 'https://r2.example/shot.jpg' in searched              # screenshot searched once too
-    assert calls['sig'] == (b'cropbytes', ['https://r2.example/shot.jpg'])
-    assert report['engines']['screenshot_crop'] == {'ok': True, 'count': 1, 'box': [0, 200, 400, 600]}
-
-
 def test_instagram_media_redirect_is_a_candidate_image():
     from services.visual_verify import platform_image_urls
     assert platform_image_urls('https://www.instagram.com/p/DK2uuidoB7V/') == \

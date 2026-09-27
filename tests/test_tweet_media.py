@@ -4,7 +4,6 @@ becomes the sighting's title/snippet."""
 import responses
 
 from providers import tweet
-from services import origin_engine as oe
 from services.visual_verify import platform_image_urls
 
 TW = 'https://x.com/svs9111/status/570514380095299584'
@@ -50,18 +49,3 @@ def test_tweet_info_via_syndication_then_fxtwitter_fallback():
     responses.add(responses.GET, 'https://api.fxtwitter.com/svs9111/status/570514380095299584', status=500)
     assert tweet.tweet_info(TW) is None
     assert platform_image_urls(TW) == []
-
-
-def test_pivot_prefers_x_media_and_skips_thumbnails_and_size_variants():
-    def item(url, w, h):
-        return {'visual': {'verdict': 'confirmed', 'match_kind': 'variant', 'matched_from': 'page',
-                           'geometry': {'same_scene': True}, 'matched_image_url': url},
-                'image_size': [w, h]}
-    tl = [item('https://i.pinimg.com/originals/6b/47/6f/6b476f6e.jpg', 1080, 1080),
-          item('https://i.pinimg.com/736x/98/d4/75/98d4758b.jpg', 736, 736),
-          item('https://i.pinimg.com/236x/98/d4/75/98d4758b.jpg', 236, 236),
-          item('https://pbs.twimg.com/media/ESKYrQDW4AIMwI0.jpg?name=orig', 1024, 1024)]
-    assert oe.original_images_for_pivot(tl) == [
-        'https://pbs.twimg.com/media/ESKYrQDW4AIMwI0.jpg?name=orig',
-        'https://i.pinimg.com/originals/6b/47/6f/6b476f6e.jpg',
-        'https://i.pinimg.com/736x/98/d4/75/98d4758b.jpg']

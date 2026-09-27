@@ -78,29 +78,3 @@ def test_signature_carries_geometry_and_verify_confirms_a_restored_copy(monkeypa
                              'https://page.example/post2', sig)
     assert out['verdict'] == 'ambiguous' and out['geometry']['same_scene'] is False
     assert 'geometry' in (out.get('note') or '')
-
-
-def test_prescreen_thumb_promotes_geometric_matches():
-    from services import origin_engine as oe
-    orig = _textured(5)
-    query = orig.crop((60, 40, 580, 440))
-    sig = vv.build_query_signature(_jpeg(query))
-    sig['embedding'] = None
-    thumb = orig.resize((320, 240))
-    res = oe._score_thumb(thumb, [sig], [])
-    assert res['verdict'] == 'match' and res['geometry']['same_scene'] is True
-    res2 = oe._score_thumb(_textured(6).resize((320, 240)), [sig], [])
-    assert res2['verdict'] != 'match'
-
-
-def test_exact_version_first_seen_and_version_note():
-    from services import origin_engine as oe
-    base = {'confidence': 0.95, 'dropped': False, 'is_listing': False}
-    origin = dict(base, url='https://x.com/a/status/1', published_at='2015-02-25T09:23:22Z',
-                  visual={'verdict': 'confirmed', 'match_kind': 'variant', 'geometry': {'same_scene': True}})
-    exact = dict(base, url='https://tiktok.com/@u/photo/2', published_at='2026-09-12T00:00:00Z',
-                 visual={'verdict': 'confirmed', 'match_kind': 'exact'})
-    item, note = oe.exact_version_first_seen([exact, origin], origin)
-    assert item is exact and 'نسخة معدّلة' in note
-    # origin itself exact -> nothing extra
-    assert oe.exact_version_first_seen([exact], exact) == (None, None)

@@ -33,14 +33,3 @@ def test_public_media_route_streams_object_and_rejects_bad_token(client, monkeyp
     assert r.data == b'JPEGBYTES' and r.headers['Content-Type'].startswith('image/jpeg')
     assert client.get('/api/media/deadbeef/uploads/a.jpg').status_code == 404
     assert client.get(f'/api/media/{storage.media_token("secret/x")}/secret/x').status_code == 404
-
-
-def test_search_copy_uses_public_route_in_production(monkeypatch):
-    from services import origin_engine as oe
-    monkeypatch.setenv('SECRET_KEY', 's3cret')
-    monkeypatch.setenv('SEARCH_COPY', 'imgbb')
-    monkeypatch.delenv('R2_PUBLIC_BASE_URL', raising=False)
-    monkeypatch.setenv('PUBLIC_BASE_URL', 'https://tahaqqaq.onrender.com')
-    presigned = 'https://acct.r2.cloudflarestorage.com/tahaqqaq-media/uploads/q.jpg?X-Amz-Signature=abc'
-    url = oe.search_copy_url(b'img', presigned)
-    assert url.startswith('https://tahaqqaq.onrender.com/api/media/') and url.endswith('/uploads/q.jpg')
