@@ -29,16 +29,45 @@ def test_lens_no_results_answer_raises_a_distinct_error(monkeypatch):
     assert serpapi.lens_matches('https://pbs.twimg.com/a.jpg', 'exact_matches') == []
 
 
-def test_google_engines_get_a_proxy_first_for_refused_hosts(monkeypatch):
+def test_google_variant_order_direct_then_copies_then_proxy(monkeypatch):
     monkeypatch.setattr(oe, 'LENS_IMAGE_PROXY', 'wsrv')
-    assert oe.google_image_urls('https://pub-1.r2.dev/uploads/a.jpg') == [
-        'https://wsrv.nl/?url=pub-1.r2.dev/uploads/a.jpg&output=jpg&filename=q.jpg',
-        'https://pub-1.r2.dev/uploads/a.jpg']
-    # ordinary hosts: direct first, proxy only as a fallback
-    got = oe.google_image_urls('https://i.ibb.co/x/q.jpg')
-    assert got[0] == 'https://i.ibb.co/x/q.jpg' and 'wsrv.nl' in got[1]
+    monkeypatch.setattr(oe, 'GOOGLE_REFUSED_HOSTS', ())
+    got = oe.google_image_urls('https://pub-1.r2.dev/uploads/a.jpg',
+                               ['https://pub-1.r2.dev/uploads/small.jpg', 'https://i.ibb.co/x/q.jpg'])
+    assert got == ['https://pub-1.r2.dev/uploads/a.jpg', 'https://pub-1.r2.dev/uploads/small.jpg',
+                   'https://i.ibb.co/x/q.jpg',
+                   'https://wsrv.nl/?url=pub-1.r2.dev/uploads/a.jpg&output=jpg&filename=q.jpg']
+    # a host known to be blocked goes last
+    monkeypatch.setattr(oe, 'GOOGLE_REFUSED_HOSTS', ('r2.dev',))
+    got = oe.google_image_urls('https://pub-1.r2.dev/uploads/a.jpg', ['https://i.ibb.co/x/q.jpg'])
+    assert got[0] == 'https://i.ibb.co/x/q.jpg' and got[-1] == 'https://pub-1.r2.dev/uploads/a.jpg'
     monkeypatch.setattr(oe, 'LENS_IMAGE_PROXY', 'none')
+    monkeypatch.setattr(oe, 'GOOGLE_REFUSED_HOSTS', ())
     assert oe.google_image_urls('https://pub-1.r2.dev/uploads/a.jpg') == ['https://pub-1.r2.dev/uploads/a.jpg']
+
+
+def test_google_fallback_copies_small_reencoded_then_imgbb(monkeypatch):
+    import io
+    from PIL import Image
+    buf = io.BytesIO(); Image.new('RGB', (1600, 900), (90, 120, 200)).save(buf, format='JPEG')
+    big = buf.getvalue()
+    small = oe.small_copy_bytes(big)
+    assert small and Image.open(io.BytesIO(small)).size == (512, 288)
+    assert oe.small_copy_bytes(small) is None                     # already small
+    hosted = []
+    import services.storage_service as ss
+    import providers.imgbb as imgbb
+    monkeypatch.setattr(ss, 'host_image', lambda data, filename_hint='x': hosted.append(len(data)) or
+                        'https://acct.r2.cloudflarestorage.com/b/uploads/s.jpg?X-Amz-Signature=1')
+    monkeypatch.setattr(imgbb, 'upload_to_imgbb', lambda data, expiration=None: 'https://i.ibb.co/x/s.jpg')
+    monkeypatch.setenv('R2_PUBLIC_BASE_URL', 'https://pub-1.r2.dev')
+    monkeypatch.setenv('IMGBB_API_KEY', 'k')
+    monkeypatch.setenv('SEARCH_COPY', 'imgbb')
+    assert oe.google_fallback_copies(big, 'https://pub-1.r2.dev/uploads/a.jpg') == (
+        'https://pub-1.r2.dev/uploads/s.jpg', 'https://i.ibb.co/x/s.jpg')
+    assert hosted == [len(small)]
+    monkeypatch.setenv('SEARCH_COPY', 'none')
+    assert oe.google_fallback_copies(big, 'https://pub-1.r2.dev/uploads/a.jpg') == ()
 
 
 def test_lens_retry_switches_host_on_no_results_and_reports_fetch_failure(monkeypatch):

@@ -151,16 +151,20 @@ INSPECT_TIMEOUT_S = 90     # per inspection batch
 LENS_RETRY_DELAY_S = float(os.environ.get('LENS_RETRY_DELAY_S', '2'))
 
 
-# Hosts Google's Lens fetcher refuses (live finding 2026-09-22: every
-# Cloudflare R2 link — presigned or public r2.dev — came back "hasn't
-# returned any results", the exact text a 404 URL gets, while the same
-# photo on any ordinary host returned dozens of matches; Yandex accepts
-# r2.dev fine). Google engines therefore get the image through an image
-# CDN proxy first when it lives on one of these hosts.
+# Google's Lens fetcher answers "hasn't returned any results" (the text a
+# 404 URL gets) for some FILES on every host — live finding 2026-09-27: an
+# AI-restored upload got nothing from R2, ImgBB or a direct link, while a
+# 512-px re-encoded copy of it returned 18 visual matches and a CDN-proxied
+# copy 5-7; the same R2 host served a normal photo to Lens fine. Google
+# engines therefore cycle through URL variants of the query: the direct
+# link, a small re-encoded copy we host, the CDN proxy, an ImgBB copy.
+# GOOGLE_REFUSED_HOSTS (optional) puts the variants ahead of the direct
+# link for hosts that turn out to be blocked outright.
 GOOGLE_REFUSED_HOSTS = tuple(h.strip().lower() for h in os.environ.get(
-    'GOOGLE_REFUSED_HOSTS', 'r2.dev,r2.cloudflarestorage.com').split(',') if h.strip())
+    'GOOGLE_REFUSED_HOSTS', '').split(',') if h.strip())
 LENS_IMAGE_PROXY = os.environ.get('LENS_IMAGE_PROXY', 'wsrv')
 _PROXY_TEMPLATES = {'wsrv': 'https://wsrv.nl/?url={url}&output=jpg&filename=q.jpg'}
+SMALL_COPY_PX = int(os.environ.get('LENS_SMALL_COPY_PX', '512'))
 
 
 def _host_refused_by_google(url):
@@ -185,19 +189,68 @@ def proxied_image_url(url):
 
 def google_image_urls(image_url, alternates=()):
     """Ordered URL variants for the Google engines (Lens, reverse image):
-    proxy first when the image sits on a host Google refuses, the direct
-    link otherwise; every other variant follows as a fallback."""
-    out = []
+    the direct link, then the alternates (small re-encoded copy, ImgBB
+    copy), then the CDN proxy. A host listed in GOOGLE_REFUSED_HOSTS goes
+    last instead of first."""
     proxied = proxied_image_url(image_url) if not urlparse(image_url).query else None
-    if _host_refused_by_google(image_url) and proxied:
-        out.append(proxied)
-    out.append(image_url)
-    if proxied and proxied not in out:
-        out.append(proxied)
-    for u in alternates or ():
+    alts = [u for u in (alternates or ()) if u and u != image_url]
+    if _host_refused_by_google(image_url):
+        order = alts + ([proxied] if proxied else []) + [image_url]
+    else:
+        order = [image_url] + alts + ([proxied] if proxied else [])
+    out = []
+    for u in order:
         if u and u not in out:
             out.append(u)
     return out
+
+
+def small_copy_bytes(image_bytes, max_px=None):
+    """A downscaled, freshly encoded JPEG of the query (metadata dropped).
+    None when the image is already small or cannot be decoded."""
+    max_px = max_px or SMALL_COPY_PX
+    try:
+        import io as _io
+        from PIL import Image
+        pil = Image.open(_io.BytesIO(image_bytes)).convert('RGB')
+        if max(pil.size) <= max_px:
+            return None
+        pil.thumbnail((max_px, max_px))
+        buf = _io.BytesIO()
+        pil.save(buf, format='JPEG', quality=88)
+        return buf.getvalue()
+    except Exception as e:
+        logger.info('small copy failed: %s', e)
+        return None
+
+
+def google_fallback_copies(image_bytes, image_url):
+    """Extra public copies of the query for the Google engines, tried only
+    after the direct link came back "no results": a small re-encoded copy
+    on our own storage, and an ImgBB copy of it when a key exists."""
+    if not image_bytes or os.environ.get('SEARCH_COPY', 'imgbb').lower() == 'none':
+        return ()
+    out = []
+    small = small_copy_bytes(image_bytes)
+    if small:
+        try:
+            from services.storage_service import host_image
+            hosted = host_image(small, filename_hint='lens-small')
+            if hosted:
+                pub = search_copy_url(None, hosted)
+                if pub and not urlparse(pub).query:
+                    out.append(pub)
+        except Exception as e:
+            logger.info('small copy hosting failed: %s', e)
+        if os.environ.get('IMGBB_API_KEY'):
+            try:
+                from providers.imgbb import upload_to_imgbb
+                u = upload_to_imgbb(small, expiration=SEARCH_COPY_TTL_S)
+                if u and u.startswith('http') and u not in out:
+                    out.append(u)
+            except Exception as e:
+                logger.info('imgbb copy failed: %s', e)
+    return tuple(out)
 
 
 def _lens_exact_with_retry(image_url, hl, country, alternates=()):
@@ -1273,6 +1326,7 @@ def investigate_origin(image_url, *, progress=None, budget=None,
         image_url, image_bytes = crop_url, crop_bytes
     query_sig = frame_signatures(image_bytes, extra_frame_urls)
     search_url = search_copy_url(image_bytes, image_url)
+    alternates = google_fallback_copies(image_bytes, search_url)
     from services import file_forensics
     forensics = file_forensics.analyze(image_bytes)
     internal = internal_sightings(query_sig)
@@ -1283,7 +1337,7 @@ def investigate_origin(image_url, *, progress=None, budget=None,
     # ---- round 0: harvest + inspect
     progress('جاري البحث في المحركات (Lens, Vision, TinEye, Yandex)...')
     raw = _harvest(search_url, progress, engines_status,
-                   extra_frame_urls=extra_frame_urls)
+                   extra_frame_urls=extra_frame_urls, alternates=alternates)
     seen = set()
     cands = merge_candidates(raw, seen)
     seen.update(c['canonical'] for c in cands)

@@ -94,7 +94,7 @@ def _hash_distance(sig, pil):
 _YT_ID = re.compile(r'(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|embed/)|youtu\.be/)([A-Za-z0-9_-]{11})')
 
 
-_IG_CODE = re.compile(r'instagram\.com/(?:p|reel|reels|tv)/([A-Za-z0-9_-]{9,12})')
+_IG_CODE = re.compile(r'instagram\.com/(?:[A-Za-z0-9_.]+/)?(?:p|reel|reels|tv)/([A-Za-z0-9_-]{9,12})')
 
 
 def platform_image_urls(page_url):

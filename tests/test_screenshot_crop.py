@@ -78,3 +78,5 @@ def test_instagram_media_redirect_is_a_candidate_image():
         ['https://www.instagram.com/p/DK2uuidoB7V/media/?size=l']
     assert platform_image_urls('https://www.instagram.com/reel/DWucDsUM2TG/?hl=fi')[0].endswith('/DWucDsUM2TG/media/?size=l')
     assert platform_image_urls('https://www.instagram.com/kingsalmannaa/') == []
+    assert platform_image_urls('https://www.instagram.com/abdulmajeedphoto/p/DMLY25ZsvNA/') == \
+        ['https://www.instagram.com/p/DMLY25ZsvNA/media/?size=l']

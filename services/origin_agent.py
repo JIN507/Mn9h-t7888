@@ -774,6 +774,7 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
                 for r in internal]
     search_url = oe.search_copy_url(image_bytes, image_url)
     inv = Investigation(search_url, query_sig, progress, budget)
+    inv.alternates = oe.google_fallback_copies(image_bytes, search_url)
     inv.original_url = image_url
     inv.image_bytes = image_bytes
     inv.extra_frames = extra_frame_urls
