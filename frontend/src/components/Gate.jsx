@@ -72,7 +72,7 @@ export function GateScreen({ onEnter }) {
         }
     };
 
-    const spacing = 46;
+    const spacing = 72;
     const target = (slot) => ({ x: anchor.x + (1.5 - slot) * spacing, y: anchor.y });
     const flying = phase === 'gather' || phase === 'word' || phase === 'open';
 
