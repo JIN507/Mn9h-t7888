@@ -49,3 +49,14 @@ def test_tweet_info_via_syndication_then_fxtwitter_fallback():
     responses.add(responses.GET, 'https://api.fxtwitter.com/svs9111/status/570514380095299584', status=500)
     assert tweet.tweet_info(TW) is None
     assert platform_image_urls(TW) == []
+
+
+@responses.activate
+def test_video_tweet_gives_its_poster_frame():
+    responses.add(responses.GET, tweet.SYNDICATION_URL, json={
+        'created_at': '2024-11-10T23:00:37.000Z', 'text': 'video', 'user': {'screen_name': 'u'},
+        'photos': [], 'mediaDetails': [{'type': 'video', 'media_url_https': 'https://pbs.twimg.com/ext_tw_video_thumb/1/pu/img/abc.jpg'}],
+        'video': {'poster': 'https://pbs.twimg.com/ext_tw_video_thumb/1/pu/img/abc.jpg'}},
+        status=200, content_type='application/json')
+    info = tweet.tweet_info('https://x.com/u/status/1855747417544773860')
+    assert info['photos'] == ['https://pbs.twimg.com/ext_tw_video_thumb/1/pu/img/abc.jpg?name=orig']

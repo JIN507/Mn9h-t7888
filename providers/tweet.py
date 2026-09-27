@@ -73,10 +73,18 @@ def tweet_info(url, timeout=(5, 12)):
                          headers=UA, timeout=timeout)
         if r.status_code == 200 and r.headers.get('content-type', '').startswith('application/json'):
             d = r.json()
-            if isinstance(d, dict) and (d.get('photos') or d.get('text')):
+            if isinstance(d, dict) and (d.get('photos') or d.get('text') or d.get('mediaDetails')):
+                photos = [_orig(p.get('url')) for p in d.get('photos') or [] if p.get('url')]
+                for m in d.get('mediaDetails') or []:          # videos: the poster frame
+                    u = m.get('media_url_https')
+                    if u and _orig(u) not in photos:
+                        photos.append(_orig(u))
+                poster = (d.get('video') or {}).get('poster')
+                if poster and _orig(poster) not in photos:
+                    photos.append(_orig(poster))
                 info = {'id': tid, 'user': (d.get('user') or {}).get('screen_name') or user,
                         'text': d.get('text') or '', 'created_at': d.get('created_at'),
-                        'photos': [_orig(p.get('url')) for p in d.get('photos') or [] if p.get('url')]}
+                        'photos': photos}
     except Exception as e:
         logger.info('tweet syndication failed for %s: %s', tid, e)
     if info is None:
@@ -87,7 +95,9 @@ def tweet_info(url, timeout=(5, 12)):
                 info = {'id': tid, 'user': (tw.get('author') or {}).get('screen_name') or user,
                         'text': tw.get('text') or '', 'created_at': tw.get('created_at'),
                         'photos': [_orig(p.get('url')) for p in (tw.get('media') or {}).get('photos') or []
-                                   if p.get('url')]}
+                                   if p.get('url')]
+                                  + [_orig(v.get('thumbnail_url')) for v in (tw.get('media') or {}).get('videos') or []
+                                     if v.get('thumbnail_url')]}
         except Exception as e:
             logger.info('fxtwitter failed for %s: %s', tid, e)
     with _lock:

@@ -225,6 +225,12 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
     # 2. rank cheaply (ids date posts for free), pre-screen the top thumbnails
     #    (no credits), rank again, verify round 1
     raw = inv.new_candidates(answers)
+    # identification track (LLM + text + Grok) starts NOW, from the engine
+    # titles, and runs while verification and later rounds proceed
+    ident = {'identity': None, 'answers': {}, 'description': ''}
+    ident_thread = threading.Thread(target=_identification_track,
+                                    args=(inv, data, raw, ident), daemon=True)
+    ident_thread.start()
     ordered = engines.rank_candidates(raw, PER_DOMAIN * 4, prescreen.MAX_ROWS)
     counts = prescreen.run(ordered, inv.sigs, time_left_s=min(PRESCREEN_TIME, budget.time_left() - 60), progress=progress)
     inv.engines['prescreen'] = {'status': 'results', 'count': counts.get('match', 0), 'credits': 0,
@@ -236,13 +242,7 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
                                'candidates': [c['url'] for c in raw][:400]}
     inv.verify_many(cands, 1, reserve=LATER_PAGES_RESERVE)
 
-    # 3. identification track starts now (LLM + text + Grok) and runs while
-    #    rounds 2-3 search with the copies found on verified pages
-    ident = {'identity': None, 'answers': {}, 'description': ''}
-    ident_thread = threading.Thread(target=_identification_track,
-                                    args=(inv, data, raw, ident), daemon=True)
-    ident_thread.start()
-
+    # 3. rounds 2-3 search with the copies found on verified pages
     for rnd in range(2, MAX_ROUNDS + 1):
         if budget.time_left() < 35:
             budget.skip(f'round {rnd}', 'time')

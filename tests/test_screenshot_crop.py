@@ -47,3 +47,12 @@ def test_instagram_media_redirect_is_a_candidate_image():
     assert platform_image_urls('https://www.instagram.com/kingsalmannaa/') == []
     assert platform_image_urls('https://www.instagram.com/abdulmajeedphoto/p/DMLY25ZsvNA/') == \
         ['https://www.instagram.com/p/DMLY25ZsvNA/media/?size=l']
+
+
+def test_letterboxed_video_frame_is_not_a_screenshot():
+    """A phone video frame with black bars above and below is NOT a post
+    screenshot: cropping it would throw away the frame we need to search."""
+    canvas = np.zeros((900, 400, 3), dtype='uint8')               # black bars
+    canvas[200:600, 0:400] = _noise(400, 400, 4)
+    assert sc.detect_photo_region(_jpeg(canvas)) is None
+    assert sc.detect_photo_region(_screenshot()) is not None       # white UI still detected

@@ -16,6 +16,7 @@ MAX_AREA_FRACTION = 0.92     # ...and less than this (otherwise it IS the photo)
 FLAT_STD = 6.0               # grey std across a row/col: below = flat UI band (white/black)
 MIN_BAND_PX = 120
 MIN_FLAT_FRACTION = 0.05     # a real UI band next to the photo: >= 5% of the side
+MIN_BAND_BRIGHTNESS = 150    # UI chrome is light; black bars are letterboxed video, not a screenshot
 
 
 def _runs(mask):
@@ -64,6 +65,11 @@ def detect_photo_region(image_bytes):
     flat_above = flat_rows[:top].sum() if top > 0 else 0
     flat_below = flat_rows[bottom:].sum() if bottom < h else 0
     if max(flat_above, flat_below) < MIN_FLAT_FRACTION * h:
+        return None
+    # ...and that band is light UI chrome; dark bands are letterboxing
+    band_rows = np.concatenate([arr[:top][flat_rows[:top]], arr[bottom:][flat_rows[bottom:]]]) \
+        if (top > 0 or bottom < h) else arr[:0]
+    if band_rows.size and band_rows.mean() < MIN_BAND_BRIGHTNESS:
         return None
 
     band = arr[top:bottom]
