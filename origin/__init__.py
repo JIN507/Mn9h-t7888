@@ -1,6 +1,7 @@
 """Origin v2 — where and when an image or video was first published.
 
-See ORIGIN_V2_PLAN.md. Built module by module next to the v1 engine
-(services/origin_engine.py + services/origin_agent.py, frozen); the job
-runner routes to this package when ORIGIN_V2=true.
+See ORIGIN_V2_PLAN.md. copies -> engines -> page-level verification ->
+dates -> one eligibility rule -> report; identification track (names/event
+-> text + X search) alongside. The direct-search job calls
+origin.investigate.investigate().
 """

@@ -1,5 +1,5 @@
-"""Phase 0 of Origin v2: budgets, URL identity, benchmark verdicts, the
-ORIGIN_V2 job flag (falls back to v1 while v2 is unbuilt)."""
+"""Phase 0 of Origin v2: budgets, URL identity, benchmark verdicts, and the
+direct-search route running the v2 job."""
 import pytest
 
 from origin import urls
