@@ -254,42 +254,45 @@ def google_fallback_copies(image_bytes, image_url):
 
 
 def _lens_exact_with_retry(image_url, hl, country, alternates=()):
-    """Lens exact matches are the backbone of the harvest; SerpAPI has
-    transient blips (connection resets, empty 200s that it then caches)
-    and Google refuses some image hosts outright. Retries bypass SerpAPI's
-    cache; a "no results" answer (= image not fetched) moves on to the
-    next URL variant of the same image. When every attempt was such an
-    answer the SerpApiNoResults propagates so the engine is reported as a
-    fetch failure, not as a clean zero."""
+    """Lens exact matches are the backbone of the harvest. SerpAPI has
+    transient blips (connection resets, empty 200s that it then caches):
+    those retry the SAME url, bypassing the cache, up to LENS_EXACT_RETRIES
+    times with a short back-off. A "no results" answer (Google did not
+    accept the image, or genuinely nothing) moves straight on to the next
+    URL variant of the same image, once each, no sleep. When every attempt
+    was a "no results" the SerpApiNoResults propagates so the engine is
+    reported as a fetch failure rather than a clean zero."""
     from providers.serpapi import SerpApiNoResults
     urls = [image_url] + [u for u in (alternates or ()) if u and u != image_url]
-    max_attempts = LENS_EXACT_RETRIES + 1     # +1 per host switch below
-    idx, attempts = 0, 0
+    idx, same_tries, total = 0, 0, 0
     last_error, all_no_results = None, True
-    while attempts < max_attempts:
+    while idx < len(urls):
         url = urls[idx]
         try:
             got = lens_matches(url, 'exact_matches', hl=hl, country=country,
-                               no_cache=attempts > 0)
+                               no_cache=total > 0)
+            total += 1
             if got:
                 return got
             all_no_results = False
-            logger.info('lens exact %s/%s empty (attempt %d)', hl, country, attempts + 1)
+            same_tries += 1
+            logger.info('lens exact %s/%s empty (attempt %d)', hl, country, total)
         except SerpApiNoResults as e:
+            total += 1
             last_error = e
-            logger.info('lens exact %s/%s: not fetched / no results (attempt %d, %s)',
-                        hl, country, attempts + 1, domain_of(url))
-            if idx + 1 < len(urls):
-                idx += 1                      # another host for the same image
-                max_attempts += 1
+            logger.info('lens exact %s/%s: not accepted / no results (%s)', hl, country, domain_of(url))
+            idx += 1                         # next variant of the image, immediately
+            same_tries = 0
+            continue
         except Exception as e:
+            total += 1
             last_error = e
             all_no_results = False
-            logger.info('lens exact %s/%s failed (attempt %d): %s', hl, country,
-                        attempts + 1, e)
-        attempts += 1
-        if attempts < max_attempts:
-            time.sleep(LENS_RETRY_DELAY_S * attempts)
+            same_tries += 1
+            logger.info('lens exact %s/%s failed (attempt %d): %s', hl, country, total, e)
+        if same_tries > LENS_EXACT_RETRIES:
+            break
+        time.sleep(LENS_RETRY_DELAY_S * same_tries)
     if last_error is not None and (all_no_results or not isinstance(last_error, SerpApiNoResults)):
         raise last_error
     return []
@@ -1088,22 +1091,37 @@ def earlier_hints(timeline, first_seen, limit=5):
 
 # ------------------------------------------------------------------- expand
 
-def original_image_for_pivot(timeline, query_size=None):
+def original_images_for_pivot(timeline, limit=3):
     """When the query is a derivative (cropped / restored / recoloured) of
-    a photo found on some page, the page's full-size copy is closer to the
-    ORIGINAL file that the exact-match indexes know. Returns that image URL
-    or None when the query already matched exactly somewhere."""
+    a photo found on some page, the pages' full-size copies are closer to
+    the ORIGINAL file that the exact-match indexes know. Returns up to
+    `limit` distinct copies (largest first, one per host) — different
+    copies surface different exact matches — or [] when the query already
+    matched exactly somewhere."""
     if any((i.get('visual') or {}).get('match_kind') == 'exact' for i in timeline):
-        return None
+        return []
     pool = [i for i in timeline
             if (i.get('visual') or {}).get('verdict') == 'confirmed'
             and (i['visual'].get('geometry') or {}).get('same_scene')
             and i['visual'].get('matched_image_url')
             and i['visual'].get('matched_from') == 'page']
-    if not pool:
-        return None
     pool.sort(key=lambda i: -(i['image_size'][0] * i['image_size'][1]) if i.get('image_size') else 0)
-    return pool[0]['visual']['matched_image_url']
+    out, hosts = [], set()
+    for i in pool:
+        url = i['visual']['matched_image_url']
+        host = domain_of(url)
+        if url in out or host in hosts:
+            continue
+        out.append(url)
+        hosts.add(host)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def original_image_for_pivot(timeline, query_size=None):
+    urls = original_images_for_pivot(timeline, limit=1)
+    return urls[0] if urls else None
 
 
 def _lens_pivot(first_seen, timeline, image_url, seen, progress, engines_status):
@@ -1195,11 +1213,13 @@ def text_search_results(query, *, hl='en', gl='us', num=10):
     Raises when no provider answered."""
     errors = []
     if os.environ.get('SERPAPI_API_KEY'):
-        try:
-            from providers.serpapi import web_search
-            return web_search(query, hl=hl, gl=gl, num=num)
-        except Exception as e:
-            errors.append(f'serpapi: {e}')
+        from providers.serpapi import web_search
+        for attempt in range(2):                 # one retry for transient transport errors
+            try:
+                return web_search(query, hl=hl, gl=gl, num=num)
+            except Exception as e:
+                errors.append(f'serpapi: {e}')
+                time.sleep(1.0 * (attempt + 1))
     if os.environ.get('ZENSERP_API_KEY'):
         try:
             from providers.zenserp import text_search

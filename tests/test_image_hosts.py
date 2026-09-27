@@ -83,14 +83,19 @@ def test_lens_retry_switches_host_on_no_results_and_reports_fetch_failure(monkey
     got = oe._lens_exact_with_retry('direct', 'en', 'us', alternates=('proxy',))
     assert got and calls == [('direct', False), ('proxy', True)]
 
-    # every variant refused -> SerpApiNoResults propagates -> status fetch_failed
+    # every variant refused -> each tried ONCE -> SerpApiNoResults propagates -> fetch_failed
     calls.clear()
-    monkeypatch.setattr(oe, 'lens_matches', lambda *a, **k: (_ for _ in ()).throw(serpapi.SerpApiNoResults('x')))
+
+    def refused(image_url, lens_type, **k):
+        calls.append(image_url)
+        raise serpapi.SerpApiNoResults('x')
+    monkeypatch.setattr(oe, 'lens_matches', refused)
     try:
-        oe._lens_exact_with_retry('direct', 'en', 'us', alternates=('proxy',))
+        oe._lens_exact_with_retry('direct', 'en', 'us', alternates=('small', 'proxy'))
         assert False
     except serpapi.SerpApiNoResults:
         pass
+    assert calls == ['direct', 'small', 'proxy']
     st = oe._failure_status(serpapi.SerpApiNoResults('x'))
     assert st['ok'] is False and st['note'] == 'fetch_failed'
 
