@@ -254,17 +254,20 @@ def rank_candidates(cands, per_domain=3, limit=40):
         s = {'exact': 0, 'text': 15, 'page': 20, 'similar': 30}.get(c['match'], 40)
         tv = (c.get('thumb_check') or {}).get('verdict')
         if tv == 'match':
-            s -= 40
+            s -= 30
         elif tv == 'differs':
             s += 60
         s -= 5 * min(len(c.get('engines') or []), 3)
         if c.get('crawl_date'):
             s -= 6
+        hint = date_hint(c)
         if urls.is_social(c['url']):
             s -= 4
+            if hint:
+                s -= 30                  # a post whose id dates it: cheapest possible origin check
         if urls.is_listing(c['url']):
             s += 40                      # listings are never origins: last
-        return (s, date_hint(c) or '9999')
+        return (s, hint or '9999')
     out, per = [], {}
     for c in sorted(cands, key=score):
         d = urls.domain_of(c['url'])

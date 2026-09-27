@@ -54,6 +54,7 @@ def public_url_for(key):
 
 def run_case(case, investigate):
     """investigate(image_url) -> report dict with first_seen{url}, budget{credits}."""
+    os.environ['ORIGIN_DEBUG'] = 'true'          # payloads carry the ranked candidate list
     t0 = time.time()
     try:
         url = public_url_for(case['key'])

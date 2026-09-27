@@ -292,9 +292,9 @@ def test_rank_uses_date_hints_thumb_verdicts_and_social_cap():
     cands.append({'url': 'https://blog.example/b', 'engine': 'yandex', 'match': 'similar', 'engines': ['yandex'], 'thumbs': [],
                   'thumb_check': {'verdict': 'match'}})
     ranked = engines.rank_candidates(cands, per_domain=3, limit=20)
-    assert ranked[0]['url'] == 'https://blog.example/b'                       # thumbnail matched the photo
-    assert ranked[1]['url'] == 'https://x.com/u0/status/1814337329387175999'  # earliest post by id
-    assert sum(1 for c in ranked if 'x.com' in c['url']) == 12                # social cap, not 3
+    assert ranked[0]['url'] == 'https://x.com/u0/status/1814337329387175999'  # earliest dated post first
+    assert sum(1 for c in ranked[:12] if 'x.com' in c['url']) == 12           # social cap 12, in id order
+    assert ranked[12]['url'] == 'https://blog.example/b'                      # then the thumbnail match
     assert ranked[-1]['url'] == 'https://news.example/a'                      # thumbnail differs: last
     assert engines.date_hint(cands[0]).startswith('2024-07-19T16:31:42')
 

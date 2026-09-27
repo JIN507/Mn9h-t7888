@@ -23,9 +23,12 @@ from origin.budget import Budget
 
 logger = logging.getLogger(__name__)
 
-VERIFY_WORKERS = 10
-ROUND1_PAGES = 50
+VERIFY_WORKERS = 16
+ROUND1_PAGES = 60
 ROUND2_PAGES = 24
+VERIFY_TIME_R1 = 45       # seconds, hard cap per verification round
+VERIFY_TIME_RN = 30
+PRESCREEN_TIME = 15
 MAX_ROUNDS = 3
 NEW_COPIES_PER_ROUND = 2
 PER_DOMAIN = 3
@@ -66,7 +69,7 @@ class Investigation:
         return answers
 
     # -- verification
-    def verify_many(self, cands, round_no):
+    def verify_many(self, cands, round_no, time_cap=None):
         allowed = self.budget.take_pages(len(cands))
         cands = cands[:allowed]
         if not cands:
@@ -76,8 +79,9 @@ class Investigation:
         ex = concurrent.futures.ThreadPoolExecutor(max_workers=min(VERIFY_WORKERS, len(cands)))
         futures = {ex.submit(self._verify_one, c, round_no): c for c in cands}
         done = 0
+        cap = time_cap or (VERIFY_TIME_R1 if round_no == 1 else VERIFY_TIME_RN)
         try:
-            for fut in concurrent.futures.as_completed(futures, timeout=max(20, min(70, self.budget.time_left()))):
+            for fut in concurrent.futures.as_completed(futures, timeout=max(10, min(cap, self.budget.time_left() - 10))):
                 done += 1
                 try:
                     s = fut.result()
@@ -181,18 +185,23 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
                 a.status = 'empty'
                 inv.engines[k] = a.brief()
 
-    # 2. pre-screen thumbnails (no credits), then verify round 1
+    # 2. rank cheaply (ids date posts for free), pre-screen the top thumbnails
+    #    (no credits), rank again, verify round 1
     raw = inv.new_candidates(answers)
-    counts = prescreen.run(raw, inv.sigs, time_left_s=budget.time_left() - 60, progress=progress)
+    ordered = engines.rank_candidates(raw, PER_DOMAIN * 4, prescreen.MAX_ROWS)
+    counts = prescreen.run(ordered, inv.sigs, time_left_s=min(PRESCREEN_TIME, budget.time_left() - 60), progress=progress)
     inv.engines['prescreen'] = {'status': 'results', 'count': counts.get('match', 0), 'credits': 0,
                                 'note': f"{counts.get('differs', 0)} rejected by thumbnail", 'copy_id': None}
-    cands = engines.rank_candidates(raw, PER_DOMAIN, max(ROUND1_PAGES, min(70, counts.get('match', 0))))
+    cands = engines.rank_candidates(raw, PER_DOMAIN, max(ROUND1_PAGES, min(80, counts.get('match', 0))))
     inv.rounds.append({'round': 1, 'candidates': len(raw), 'verified': len(cands)})
+    if os.environ.get('ORIGIN_DEBUG', '').lower() == 'true':
+        inv.extras['debug'] = {'ranked': [c['url'] for c in cands],
+                               'candidates': [c['url'] for c in raw][:400]}
     inv.verify_many(cands, 1)
 
     # 3. rounds 2..3 on new copies
     for rnd in range(2, MAX_ROUNDS + 1):
-        if budget.time_left() < 45:
+        if budget.time_left() < 35:
             budget.skip(f'round {rnd}', 'time')
             break
         new_copies = cs.unsearched('lens_exact_en', limit=NEW_COPIES_PER_ROUND)
@@ -211,8 +220,11 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
                 tasks.append((f'yandex@copy{c.id}', (lambda c=c: engines.yandex(c.url, c.id)), engines.YANDEX_CREDITS))
         answers = inv.run(tasks, timeout_s=50)
         raw = inv.new_candidates(answers)
-        prescreen.run(raw, inv.sigs, time_left_s=budget.time_left() - 40, progress=progress)
+        prescreen.run(engines.rank_candidates(raw, PER_DOMAIN * 4, 120), inv.sigs,
+                      time_left_s=min(10, budget.time_left() - 40), progress=progress)
         cands = engines.rank_candidates(raw, PER_DOMAIN, ROUND2_PAGES)
+        if os.environ.get('ORIGIN_DEBUG', '').lower() == 'true':
+            inv.extras.setdefault('debug', {}).setdefault('later_rounds', []).append([c['url'] for c in cands])
         inv.rounds.append({'round': rnd, 'copies': [c.id for c in new_copies], 'candidates': len(cands)})
         if cands:
             inv.verify_many(cands, rnd)

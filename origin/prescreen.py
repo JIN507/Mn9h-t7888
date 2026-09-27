@@ -18,9 +18,9 @@ from services.visual_verify import UA, MAX_IMAGE_BYTES, _hash_distance
 
 logger = logging.getLogger(__name__)
 
-WORKERS = 16
+WORKERS = 24
 TIMEOUT = (3, 6)
-MAX_ROWS = 150
+MAX_ROWS = 250
 PHASH_MATCH = 12
 
 

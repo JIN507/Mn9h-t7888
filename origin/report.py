@@ -104,5 +104,6 @@ def build(sightings, *, copies, engines, budget, extras, upload_phash=None, note
         'forensics': None,
         'internal_sightings': [],
         'screenshot': extras.get('screenshot') or False,
+        'debug': extras.get('debug'),
         'raw': {},
     }
