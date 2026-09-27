@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Search, Image as ImageIcon, ExternalLink, Mic, Video, FolderOpen, LogOut, LayoutDashboard, Menu, X, FileText } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useGate } from './Gate';
 import clsx from 'clsx';
 import logoImg from '../assets/logo.png';
 
@@ -74,6 +75,7 @@ const LogoImage = () => (
 
 const NavBar = () => {
     const { isAuthenticated, logout, isAdmin } = useAuth();
+    const gate = useGate();
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     const closeMobile = () => setMobileMenuOpen(false);
@@ -90,6 +92,13 @@ const NavBar = () => {
                     </Link>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {gate?.username && gate.username !== 'open' && (
+                            <button onClick={gate.logout} className="navbar-icon-btn" title="تسجيل الخروج"
+                                style={{ color: '#64748b', padding: '6px 8px' }} aria-label="تسجيل الخروج">
+                                <LogOut size={15} />
+                                <span className="hidden sm:inline" style={{ fontSize: '0.75rem', fontWeight: 600 }}>خروج</span>
+                            </button>
+                        )}
                         {isAuthenticated && (
                             <>
                                 {isAdmin && (
