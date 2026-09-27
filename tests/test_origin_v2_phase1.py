@@ -490,3 +490,15 @@ def test_thin_lens_answer_is_retried_uncached_once(monkeypatch):
     assert ('en', True) in calls and ('ar', True) in calls                     # both thin answers retried uncached
     assert payload['engines']['lens_exact_en@retry']['status'] == 'results'
     assert payload['first_seen'] is None and payload['prior_sightings'] == []
+
+
+def test_titles_translated_to_arabic_in_the_job(monkeypatch):
+    from origin import translate
+    class FakeTr:
+        def translate(self, text):
+            return 'خفر السواحل الهندي على X' if 'Coast Guard' in text else text
+    monkeypatch.setattr(translate, '_translator', lambda: FakeTr())
+    items = [{'title': 'Indian Coast Guard (@IndiaCoastGuard) on X'}, {'title': 'ذكريات الماضي'}, {'title': ''}]
+    assert translate.translate_titles(items) == 1
+    assert items[0]['title_ar'] == 'خفر السواحل الهندي على X' and 'title_ar' not in items[1]
+    assert translate.needs_translation('12345') is False

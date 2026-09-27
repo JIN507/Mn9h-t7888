@@ -338,10 +338,8 @@ export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = fal
                             <DatePill item={report.firstSeen} strong />
                             <PlatformPill url={report.firstSeen.url} />
                             <ProbablePill item={report.firstSeen} />
-                            <VariantPill item={report.firstSeen} />
-                            <EvidencePills item={report.firstSeen} />
                         </div>
-                        <h3 className="font-bold text-slate-800 text-sm mb-1 line-clamp-2" dir="auto">{report.firstSeen.title}</h3>
+                        <h3 className="font-bold text-slate-800 text-sm mb-1 line-clamp-2" dir="auto">{report.firstSeen.title_ar || report.firstSeen.title}</h3>
                         <a href={report.firstSeen.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-slate-500 hover:text-slate-900 break-all line-clamp-1" dir="ltr">
                             {report.firstSeen.url}
                         </a>
@@ -523,10 +521,8 @@ export const TimelineCard = ({ report, timeline, cached = false, onRerun, error,
                                     <DatePill item={item} strong={isFirst} />
                                     <PlatformPill url={item.link} />
                                     {isFirst && <ProbablePill item={item} />}
-                                    <VariantPill item={item} />
-                                    {item.image_level ? <EvidencePills item={item} /> : <VerdictPill item={item} />}
                                 </div>
-                                <p className="font-bold text-xs text-slate-800 mt-1 line-clamp-1" dir="auto">{item.title}</p>
+                                <p className="font-bold text-xs text-slate-800 mt-1 line-clamp-1" dir="auto">{item.title_ar || item.title}</p>
                                 <p className="text-[10px] text-slate-400 break-all line-clamp-1" dir="ltr">{item.link}</p>
                             </div>
                         </a>
@@ -550,9 +546,8 @@ export const TimelineCard = ({ report, timeline, cached = false, onRerun, error,
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                     <DatePill item={item} />
                                     <PlatformPill url={item.link} />
-                                    <EvidencePills item={item} />
                                 </div>
-                                <p className="text-[10px] text-slate-400 break-all line-clamp-1" dir="ltr">{item.link}</p>
+                                <p className="text-[10px] text-slate-500 line-clamp-1" dir="auto">{item.title_ar || item.title}</p>
                             </div>
                         </a>
                     ))}

@@ -27,7 +27,9 @@ def test_budget_counts_and_refuses_over_cap():
 def test_canonical_urls_fold_platform_variants():
     a = 'https://twitter.com/svs9111/status/570514380095299584?lang=cs&s=20'
     b = 'https://x.com/svs9111/status/570514380095299584/'
-    assert urls.canonical(a) == 'https://x.com/svs9111/status/570514380095299584' == urls.canonical(b)
+    assert urls.canonical(a) == 'https://x.com/i/status/570514380095299584' == urls.canonical(b)
+    assert urls.same('https://x.com/i/status/1814337329387175999', 'https://x.com/IndiaCoastGuard/status/1814337329387175999/photo/1')
+    assert not urls.same('https://x.com/IndiaCoastGuard', 'https://x.com/IndiaCoastGuard/status/1')
     assert urls.same('https://www.pinterest.com/pin/1/?utm_medium=organic&utm_source=yandexsmartcamera',
                      'https://www.pinterest.com/pin/1/')
     assert urls.canonical('https://youtu.be/EA6bWERKe3w') == 'https://www.youtube.com/watch?v=EA6bWERKe3w'

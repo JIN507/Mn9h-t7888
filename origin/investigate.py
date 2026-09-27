@@ -317,6 +317,20 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
     payload = report.build(inv.sightings, copies=cs.briefs(), engines=inv.engines, budget=budget,
                            extras={**inv.extras, 'rounds': inv.rounds})
     payload['prior_sightings'] = inv.extras.get('prior_sightings') or []
+    if budget.time_left() > 5:
+        from origin import translate
+        progress('ترجمة العناوين...')
+        items = list(payload['timeline']) + list(payload.get('leads') or [])
+        for key in ('first_seen', 'first_seen_exact'):
+            if payload.get(key):
+                items.append(payload[key])
+        translate.translate_titles(items, time_cap_s=min(translate.TIME_CAP_S, max(3, budget.time_left() - 2)))
+        # the first-seen card is a separate dict from its timeline twin
+        by_link = {i.get('link'): i.get('title_ar') for i in payload['timeline'] if i.get('title_ar')}
+        for key in ('first_seen', 'first_seen_exact'):
+            fs = payload.get(key)
+            if fs and not fs.get('title_ar') and by_link.get(fs.get('link')):
+                fs['title_ar'] = by_link[fs['link']]
     if payload.get('first_seen'):
         fs = payload['first_seen']
         fs['archived'] = {'url': f"https://web.archive.org/web/*/{fs['url']}", 'status': 'failed'}

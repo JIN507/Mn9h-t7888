@@ -12,6 +12,7 @@ _DROP_PARAMS = ('utm_', 'fbclid', 'gclid', 'igsh', 'igshid', 'ref', 'ref_src', '
                 'lang', 'hl', 'locale', 'src', 's', 't', 'feature', 'mibextid', '__cft__',
                 '__tn__', 'rdid', 'share_url', 'sfnsn', 'is_from_webapp', 'sender_device',
                 'web_id', 'q', 'srcom')
+_X_STATUS = re.compile(r'^/(?:[A-Za-z0-9_]{1,15}|i/web|i)/status(?:es)?/(\d{15,20})(?:/.*)?$')
 _HOST_FOLD = {'twitter.com': 'x.com', 'mobile.twitter.com': 'x.com', 'www.twitter.com': 'x.com',
               'www.x.com': 'x.com', 'm.facebook.com': 'www.facebook.com',
               'mbasic.facebook.com': 'www.facebook.com', 'web.facebook.com': 'www.facebook.com',
@@ -58,6 +59,10 @@ def canonical(url):
         query = urlencode(sorted(keep))
     if len(path) > 1:
         path = path.rstrip('/')
+    if host == 'x.com':
+        m = _X_STATUS.match(path)
+        if m:
+            path, query = f'/i/status/{m.group(1)}', ''
     return urlunsplit(('https', host, path, query, ''))
 
 
