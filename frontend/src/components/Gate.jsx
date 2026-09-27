@@ -1,31 +1,37 @@
-/* The front door. Letters of تحقق drift across the screen; typing the
-   username stills them, typing the password gathers them into the word
-   above the form, and a correct login fades everything away into the app. */
+/* The front door.
+   Large, faint letters of تحقق drift slowly across the screen. Nothing reacts
+   to typing. When the credentials are accepted, four letters fly together
+   above the form and become the word, the word swells and dissolves, and the
+   app appears underneath. */
 import { useEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
-import { ArrowLeft } from 'lucide-react';
 import apiClient from '../services/apiClient';
 
 const GateContext = createContext({ username: null, logout: () => {} });
 export const useGate = () => useContext(GateContext);
 
 const LETTERS = ['ت', 'ح', 'ق', 'ق'];
-const COUNT = 28;                               // floating glyphs on screen
+const COUNT = 18;
 
-/* deterministic pseudo-random so the field looks the same across re-renders */
 const rand = (seed) => { const x = Math.sin(seed * 9301 + 49297) * 233280; return x - Math.floor(x); };
 
-const makeGlyphs = () => Array.from({ length: COUNT }, (_, i) => ({
-    id: i,
-    ch: LETTERS[i % 4],
-    slot: i % 4,                                // which letter of the word it becomes
-    x: rand(i + 1) * 100,                       // vw
-    y: rand(i + 11) * 100,                      // vh
-    size: 26 + rand(i + 21) * 54,               // px
-    dur: 14 + rand(i + 31) * 18,                // s
-    delay: -rand(i + 41) * 30,                  // s (start mid-flight)
-    drift: 30 + rand(i + 51) * 60,              // px
-    op: 0.10 + rand(i + 61) * 0.22,
-}));
+const makeGlyphs = () => Array.from({ length: COUNT }, (_, i) => {
+    const depth = rand(i + 7);                          // 0 far … 1 near
+    return {
+        id: i,
+        ch: LETTERS[i % 4],
+        slot: i % 4,
+        x: 4 + rand(i + 1) * 92,                       // vw
+        y: 4 + rand(i + 11) * 92,                      // vh
+        size: 48 + depth * 150,                        // px
+        blur: (1 - depth) * 3,                         // px, far letters are softer
+        op: 0.05 + depth * 0.10,
+        dur: 28 + rand(i + 31) * 26,                   // s, slow
+        delay: -rand(i + 41) * 40,
+        dx: (rand(i + 51) - 0.5) * 220,                // px drift
+        dy: (rand(i + 61) - 0.5) * 160,
+        rot: (rand(i + 71) - 0.5) * 10,
+    };
+});
 
 export function GateScreen({ onEnter }) {
     const glyphs = useMemo(makeGlyphs, []);
@@ -33,23 +39,14 @@ export function GateScreen({ onEnter }) {
     const [password, setPassword] = useState('');
     const [error, setError] = useState(null);
     const [busy, setBusy] = useState(false);
-    const [phase, setPhase] = useState('drift');   // drift | still | gather | leave
+    const [phase, setPhase] = useState('idle');       // idle | gather | word | open
     const formRef = useRef(null);
     const [anchor, setAnchor] = useState({ x: 0, y: 0 });
 
-    // phases follow the typing
-    useEffect(() => {
-        if (phase === 'leave') return;
-        if (password.length > 0) setPhase('gather');
-        else if (username.length > 0) setPhase('still');
-        else setPhase('drift');
-    }, [username, password, phase]);
-
-    // where the word gathers: centred above the form
     useEffect(() => {
         const place = () => {
             const r = formRef.current?.getBoundingClientRect();
-            if (r) setAnchor({ x: r.left + r.width / 2, y: r.top - 72 });
+            if (r) setAnchor({ x: r.left + r.width / 2, y: r.top - 90 });
         };
         place();
         window.addEventListener('resize', place);
@@ -62,55 +59,54 @@ export function GateScreen({ onEnter }) {
         setBusy(true); setError(null);
         try {
             await apiClient.post('/api/gate/login', { username: username.trim(), password });
-            setPhase('leave');
-            setTimeout(() => onEnter(username.trim()), 1400);
+            // the sequence: letters fly in (1.3 s) -> the word (0.9 s) -> the word opens the app (1.4 s)
+            setPhase('gather');
+            setTimeout(() => setPhase('word'), 1300);
+            setTimeout(() => setPhase('open'), 2200);
+            setTimeout(() => onEnter(username.trim()), 3500);
         } catch (err) {
             setError(err.response?.data?.error || 'تعذّر الاتصال بالخادم');
             setBusy(false);
+            setPhase('shake');
+            setTimeout(() => setPhase('idle'), 500);
         }
     };
 
-    // target positions for the gathered word (RTL: ت on the right)
-    const spacing = 38;
+    const spacing = 46;
     const target = (slot) => ({ x: anchor.x + (1.5 - slot) * spacing, y: anchor.y });
-    const gathered = phase === 'gather' || phase === 'leave';
+    const flying = phase === 'gather' || phase === 'word' || phase === 'open';
 
     return (
         <div className={`gate ${phase}`} dir="rtl">
             <div className="gate-bg" />
             {glyphs.map((g) => {
-                // one glyph per letter of the word gathers; the rest fade out
-                const leads = g.id < 4;
+                const lead = g.id < 4;
                 const t = target(g.slot);
-                const style = gathered && leads
-                    ? { left: t.x, top: t.y, fontSize: 64, opacity: 1, transform: 'translate(-50%, -50%)', animationPlayState: 'paused' }
-                    : {
-                        left: `${g.x}vw`, top: `${g.y}vh`, fontSize: g.size, opacity: gathered ? 0 : g.op,
-                        '--drift': `${g.drift}px`, animationDuration: `${g.dur}s`, animationDelay: `${g.delay}s`,
-                        animationPlayState: phase === 'drift' ? 'running' : 'paused',
-                    };
-                return <span key={g.id} className={`gate-glyph ${leads ? 'lead' : ''}`} style={style}>{g.ch}</span>;
+                const style = flying && lead
+                    ? { left: t.x, top: t.y, fontSize: 84, opacity: phase === 'gather' ? 1 : 0, filter: 'none',
+                        transform: 'translate(-50%, -50%)', animation: 'none' }
+                    : { left: `${g.x}vw`, top: `${g.y}vh`, fontSize: g.size, opacity: flying ? 0 : g.op,
+                        filter: `blur(${g.blur}px)`, animationDuration: `${g.dur}s`, animationDelay: `${g.delay}s`,
+                        '--dx': `${g.dx}px`, '--dy': `${g.dy}px`, '--rot': `${g.rot}deg` };
+                return <span key={g.id} className="gate-glyph" style={style}>{g.ch}</span>;
             })}
 
-            {/* the connected word the letters become */}
-            <span className="gate-gathered" style={{ left: anchor.x, top: anchor.y }}>تحقق</span>
+            <span className="gate-word-final" style={{ left: anchor.x, top: anchor.y }}>تحقق</span>
 
             <form ref={formRef} onSubmit={submit} className="gate-card" autoComplete="off">
-                <div className="gate-title">
-                    <span className="gate-word">تحقق</span>
-                    <p>منصة التحقق من الوسائط</p>
+                <div className="gate-brand">تحقق</div>
+                <p className="gate-sub">منصة التحقق من الوسائط</p>
+                <div className="gate-field">
+                    <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder=" " autoFocus spellCheck={false} dir="ltr" id="gate-user" />
+                    <label htmlFor="gate-user">اسم المستخدم</label>
                 </div>
-                <label className="gate-field">
-                    <span>اسم المستخدم</span>
-                    <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus spellCheck={false} dir="ltr" />
-                </label>
-                <label className="gate-field">
-                    <span>كلمة المرور</span>
-                    <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} dir="ltr" />
-                </label>
+                <div className="gate-field">
+                    <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder=" " dir="ltr" id="gate-pass" />
+                    <label htmlFor="gate-pass">كلمة المرور</label>
+                </div>
                 {error && <p className="gate-error">{error}</p>}
                 <button type="submit" className="gate-btn" disabled={busy || !username || !password}>
-                    {busy ? 'جارٍ الدخول…' : <>دخول <ArrowLeft className="w-4 h-4" /></>}
+                    {busy ? 'جارٍ التحقق…' : 'دخول'}
                 </button>
             </form>
         </div>
