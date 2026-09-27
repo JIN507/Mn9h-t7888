@@ -979,7 +979,7 @@ def _eligible_first(item):
     v = item['visual']['verdict']
     if v == 'rejected' or item.get('dropped') or item.get('is_listing'):
         return False
-    if item.get('temporal_outlier'):
+    if item.get('temporal_outlier') or item.get('engine_only_outranked'):
         return False
     if item['visual'].get('thumbnail_only') or item.get('is_lower_bound'):
         return False
@@ -1011,8 +1011,8 @@ def _is_temporal_outlier(item, eligible):
     """True when `item` is a thumbnail-only variant far ahead of the
     cluster of strongly dated sightings, with no companion near its date."""
     v = item['visual']
-    if not (v.get('match_kind') == 'variant' and v.get('matched_from') == 'engine'):
-        return False
+    if v.get('matched_from') != 'engine' or item.get('page_verified'):
+        return False            # the page itself was seen to hold the image
     if (v.get('geometry') or {}).get('same_scene'):
         return False            # keypoint geometry settled it: same photograph
     strong = sorted(_days(i['published_at']) for i in eligible

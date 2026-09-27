@@ -900,6 +900,15 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
 
     first_seen = inv.first_seen()
     pick = _validated_pick(inv, finish)
+    if (pick and first_seen and pick is not first_seen
+            and first_seen['visual'].get('matched_from') == 'engine'
+            and not (first_seen['visual'].get('geometry') or {}).get('same_scene')
+            and pick['visual'].get('matched_from') == 'page'):
+        # The deterministic pick rests on an engine thumbnail alone (a claim
+        # the page never confirmed); the model's pick was verified on the
+        # page itself and it explained why. Page evidence wins.
+        first_seen['engine_only_outranked'] = pick['url']
+        first_seen = inv.first_seen()
 
     kept = [i for i in inv.timeline if i['visual']['verdict'] != 'rejected'
             and not i.get('dropped')]

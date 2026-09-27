@@ -31,6 +31,7 @@ SIM_CONFIRM = 0.90
 SIM_AMBIGUOUS = 0.75
 GEOM_MIN_SIM = 0.55      # run geometry on candidates at least this similar (or hash-close)
 GEOM_MAX_PHASH = 26
+PAGE_CHECKS_AFTER_ENGINE_HIT = 3   # page images compared after an engine-thumbnail hash hit
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 UA = {'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                      'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -256,12 +257,18 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
     best_url = None
     best_blob = None
     best_geom = None
+    engine_exact = None          # engine thumbnail hashed like the query (a claim)
+    page_checked = 0
+    page_rejected = 0
     from services import geometric_verify
 
     for img_url in candidates:
+        from_engine = img_url in engine_given
+        if engine_exact is not None and page_checked >= PAGE_CHECKS_AFTER_ENGINE_HIT:
+            break
         try:
             headers = UA
-            if 'instagram.com' in img_url and '/media' in img_url:
+            if ('instagram.com' in img_url and '/media' in img_url) or 'lookaside.fbsbx.com' in img_url:
                 from services.date_evidence import CRAWLER_UA
                 headers = CRAWLER_UA
             r = requests.get(img_url, headers=headers, timeout=timeout, stream=True)
@@ -274,20 +281,27 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
             continue
 
         out['checked_images'] += 1
+        if not from_engine:
+            page_checked += 1
 
         distances = [d for d in (_hash_distance(s, pil) for s in sigs) if d is not None]
         distance = min(distances) if distances else None
-        if distance is not None and (best_dist is None or distance < best_dist):
-            best_dist = distance
+        if distance is not None:
+            if best_dist is None or distance < best_dist:
+                best_dist = distance
             if distance <= PHASH_SAME_MAX_DISTANCE:
-                out.update(verdict='confirmed', match_kind='exact',
+                hit = dict(verdict='confirmed', match_kind='exact',
                            phash_distance=distance, matched_image_url=img_url,
-                           matched_size=pil.size,
-                           matched_from='engine' if img_url in engine_given else 'page')
+                           matched_size=pil.size, matched_from='engine' if from_engine else 'page')
                 if keep_bytes:
-                    out['matched_image_bytes'] = data
-                    out['matched_headers'] = dict(r.headers)
-                return out
+                    hit['matched_image_bytes'] = data
+                    hit['matched_headers'] = dict(r.headers)
+                if not from_engine:
+                    out.update(hit)
+                    return out           # the page itself shows the image
+                if engine_exact is None:
+                    engine_exact = hit   # remember the claim, look at the page's own images
+                continue
 
         sim = None
         if query_embeddings:
@@ -303,7 +317,8 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
         # Geometry decides the grey zone: a re-framed / restored / cropped
         # copy confirms on keypoints, a look-alike scene does not.
         worth_geometry = ((sim is not None and sim >= GEOM_MIN_SIM)
-                          or (sim is None and distance is not None and distance <= GEOM_MAX_PHASH))
+                          or (sim is None and distance is not None and distance <= GEOM_MAX_PHASH)
+                          or (engine_exact is not None and not from_engine))   # page must confirm the claim
         if worth_geometry and not (best_geom or {}).get('same_scene'):
             g = geometric_verify.same_scene(sigs, pil)
             if g['same_scene'] or best_geom is None or g['inliers'] > best_geom['inliers']:
@@ -319,6 +334,14 @@ def verify_html(html, url, query_sig, max_images=3, timeout=(5, 10),
     geom_no = (best_geom or {}).get('same_scene') is False
     if best_geom is not None:
         out['geometry'] = {k: best_geom.get(k) for k in ('inliers', 'good', 'ratio', 'same_scene')}
+    if engine_exact is not None and not geom_ok and not (best_sim is not None and best_sim >= SIM_CONFIRM):
+        # Only the engine's thumbnail matched. Page images that geometry
+        # rejects contradict it; unverifiable pages keep the engine claim.
+        out.update(engine_exact)
+        if page_checked and geom_no:
+            out.update(verdict='ambiguous', match_kind=None,
+                       note='engine thumbnail matches, the page\'s own images do not')
+        return out
     if best_sim is not None or geom_ok:
         if best_sim is not None:
             out['similarity'] = round(best_sim, 4)
