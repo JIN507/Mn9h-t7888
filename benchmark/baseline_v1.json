@@ -1,0 +1,37 @@
+{
+ "engine": "v1 (origin_agent)",
+ "recorded": "2026-09-27",
+ "source": "live run logs of this session; no new v1 runs were made",
+ "results": {
+  "maersk_frankfurt": {
+   "verdict": "pass",
+   "origin": "https://x.com/IndiaCoastGuard/status/1814337329387175999",
+   "seconds": 212,
+   "credits": 25
+  },
+  "singers_restored": {
+   "verdict": "acceptable",
+   "origin": "https://x.com/0fj/status/1234717126671425537",
+   "seconds": 263,
+   "credits": 22
+  },
+  "abha_airport_frame": {
+   "verdict": "pass",
+   "origin": "https://t.me/s/sharyemeny?before=18194",
+   "seconds": 90,
+   "credits": 12
+  },
+  "instagram_screenshot": {
+   "verdict": "pass",
+   "origin": "https://www.facebook.com/groups/1362264327769433/posts/1485484632114068/",
+   "seconds": 150,
+   "credits": 14
+  },
+  "bus_fire_frame": {
+   "verdict": "pass",
+   "origin": "https://x.com/anesmansory/status/1855747417544773860",
+   "seconds": 68,
+   "credits": 10
+  }
+ }
+}

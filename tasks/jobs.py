@@ -261,8 +261,18 @@ def _run_origin_engine(image_url, extra_image_urls=None):
     from providers import deepseek
     use_agent = (os.environ.get('ORIGIN_AGENT', 'true').lower() == 'true'
                  and deepseek.configured())
+    use_v2 = os.environ.get('ORIGIN_V2', 'false').lower() == 'true'
     try:
-        if use_agent:
+        if use_v2:
+            from origin.investigate import investigate as v2_investigate
+            report = v2_investigate(image_url, progress=_progress,
+                                    extra_frame_urls=extra_image_urls)
+            if not report.get('success'):
+                logger.warning('origin v2 unavailable (%s); using v1', report.get('note'))
+                use_v2 = False
+        if use_v2:
+            pass
+        elif use_agent:
             report = agent_investigate(image_url, progress=_progress,
                                        extra_frame_urls=extra_image_urls)
         else:

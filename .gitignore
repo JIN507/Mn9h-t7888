@@ -65,3 +65,6 @@ user_files/
 
 # Local demo/verification media (user assets, never commit)
 وسائط تحقق/
+
+# origin benchmark run artifacts
+benchmark/results/
