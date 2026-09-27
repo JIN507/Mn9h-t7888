@@ -22,9 +22,9 @@ const makeGlyphs = () => Array.from({ length: COUNT }, (_, i) => {
         slot: i % 4,
         x: 4 + rand(i + 1) * 92,                       // vw
         y: 4 + rand(i + 11) * 92,                      // vh
-        size: 48 + depth * 150,                        // px
+        size: 64 + depth * 190,                        // px, thin letters can be large
         blur: (1 - depth) * 3,                         // px, far letters are softer
-        op: 0.05 + depth * 0.10,
+        op: 0.07 + depth * 0.13,
         dur: 28 + rand(i + 31) * 26,                   // s, slow
         delay: -rand(i + 41) * 40,
         dx: (rand(i + 51) - 0.5) * 220,                // px drift
@@ -72,7 +72,7 @@ export function GateScreen({ onEnter }) {
         }
     };
 
-    const spacing = 72;
+    const spacing = 62;
     const target = (slot) => ({ x: anchor.x + (1.5 - slot) * spacing, y: anchor.y });
     const flying = phase === 'gather' || phase === 'word' || phase === 'open';
 
@@ -83,7 +83,7 @@ export function GateScreen({ onEnter }) {
                 const lead = g.id < 4;
                 const t = target(g.slot);
                 const style = flying && lead
-                    ? { left: t.x, top: t.y, fontSize: 84, opacity: phase === 'gather' ? 1 : 0, filter: 'none',
+                    ? { left: t.x, top: t.y, fontSize: 96, opacity: phase === 'gather' ? 1 : 0, filter: 'none',
                         transform: 'translate(-50%, -50%)', animation: 'none' }
                     : { left: `${g.x}vw`, top: `${g.y}vh`, fontSize: g.size, opacity: flying ? 0 : g.op,
                         filter: `blur(${g.blur}px)`, animationDuration: `${g.dur}s`, animationDelay: `${g.delay}s`,
