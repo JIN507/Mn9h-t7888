@@ -19,6 +19,7 @@ os.environ['SIGHTENGINE_API_USER'] = 'test-se-user'
 os.environ['SIGHTENGINE_API_SECRET'] = 'test-se-secret'
 os.environ.pop('GOOGLE_APPLICATION_CREDENTIALS', None)
 os.environ['RATELIMIT_ENABLED'] = 'false'
+os.environ['GATE_ENABLED'] = 'false'  # the operator gate is exercised by its own tests
 os.environ['QUEUE_MODE'] = 'inline'  # jobs run synchronously in tests
 os.environ['BROWSER_SEARCH'] = 'false'  # never launch Chromium / hit tineye.com in tests
 # Route tests exercise the ImgBB fallback path; R2 gets dedicated unit tests.

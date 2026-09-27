@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { GateProvider } from './components/Gate';
 import MainLayout from './layouts/MainLayout';
 import ReverseSearch from './pages/ReverseSearch';
 import AIDetection from './pages/AIDetection';
@@ -31,6 +32,7 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
 
 function App() {
     return (
+        <GateProvider>
         <AuthProvider>
             <BrowserRouter>
                 <Routes>
@@ -63,6 +65,7 @@ function App() {
                 </Routes>
             </BrowserRouter>
         </AuthProvider>
+        </GateProvider>
     );
 }
 

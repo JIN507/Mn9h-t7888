@@ -10,7 +10,8 @@ def register_blueprints(app):
     from api.media import bp as media_bp
     from api.provenance import bp as provenance_bp
     from api.search import bp as search_bp
+    from api.gate import bp as gate_bp
 
-    for bp in (auth_bp, admin_bp, detection_bp, files_bp,
+    for bp in (gate_bp, auth_bp, admin_bp, detection_bp, files_bp,
                jobs_bp, media_bp, provenance_bp, search_bp):
         app.register_blueprint(bp)
