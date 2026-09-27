@@ -60,6 +60,7 @@ def run_case(case, investigate):
         if not url:
             return {'verdict': 'error', 'origin': None, 'seconds': 0, 'credits': 0, 'error': 'no public url'}
         report = investigate(url)
+        _save_payload(case['id'], report)
         origin = (report.get('first_seen') or {}).get('url')
         credits = (report.get('budget') or {}).get('credits')
         if credits is None:
@@ -71,6 +72,17 @@ def run_case(case, investigate):
     except Exception as e:      # a crash is a failed case, never a crashed run
         return {'verdict': 'error', 'origin': None, 'seconds': round(time.time() - t0, 1),
                 'credits': 0, 'error': str(e)[:200]}
+
+
+def _save_payload(case_id, report):
+    try:
+        out_dir = os.path.join(HERE, 'results', 'payloads')
+        os.makedirs(out_dir, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        with open(os.path.join(out_dir, f'{stamp}_{case_id}.json'), 'w', encoding='utf-8') as f:
+            json.dump(report, f, indent=1, ensure_ascii=False, default=str)
+    except Exception:
+        pass
 
 
 def compare(results, baseline):

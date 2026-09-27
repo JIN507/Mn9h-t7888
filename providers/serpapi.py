@@ -129,6 +129,8 @@ def lens_matches(image_url, lens_type, hl='ar', country='sa', no_cache=False):
             ).to_dict()
             if item.get('image'):
                 match['image_url'] = item['image']
+            if item.get('date'):
+                match['date'] = item['date']
             matches.append(match)
     return matches
 

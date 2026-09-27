@@ -47,7 +47,8 @@ def _from_serp_rows(rows, engine, copy_id, default_match):
         c = _cand(m.get('link'), engine=engine, copy_id=copy_id, title=m.get('title'),
                   thumb=m.get('thumbnail'), image_url=m.get('image_url'),
                   match={'exact': 'exact', 'similar': 'similar'}.get(m.get('match_type'), default_match),
-                  crawl_date=m.get('crawl_date'), first_indexed=m.get('first_indexed'))
+                  crawl_date=m.get('crawl_date'), first_indexed=m.get('first_indexed'),
+                  engine_date=m.get('date'))
         if c:
             out.append(c)
     return out
@@ -210,7 +211,7 @@ def merge_candidates(answers, seen=None):
                     e['match'] = c['match']
                 if c.get('copy_id') is not None:
                     e['copy_ids'].add(c['copy_id'])
-                for k in ('crawl_date', 'first_indexed', 'title'):
+                for k in ('crawl_date', 'first_indexed', 'title', 'engine_date'):
                     if not e.get(k) and c.get(k):
                         e[k] = c[k]
             for t in (c.get('image_url'), c.get('thumb')):
@@ -219,10 +220,43 @@ def merge_candidates(answers, seen=None):
     return list(merged.values())
 
 
+SOCIAL_PER_DOMAIN = 12     # posts on one platform are distinct authors, not one site
+
+
+def date_hint(cand):
+    """Zero-cost publication hint: the post id in the URL (X snowflake,
+    Instagram shortcode, TikTok id) or the date the engine showed."""
+    if cand.get('date_hint') is not None:
+        return cand['date_hint']
+    from services import date_evidence as de
+    hint = None
+    try:
+        ev = de.platform_date(cand['url']) or []
+        if ev:
+            hint = ev[0]['date']
+    except Exception:
+        hint = None
+    if not hint and cand.get('engine_date'):
+        try:
+            dt = de.parse_date(cand['engine_date'])
+            hint = de.to_iso(dt) if dt else None
+        except Exception:
+            hint = None
+    cand['date_hint'] = hint or ''
+    return cand['date_hint']
+
+
 def rank_candidates(cands, per_domain=3, limit=40):
-    """Exact and dated first, social next, one domain never floods."""
+    """Who gets a page fetch: thumbnail matches and exact rows first, then
+    the earliest-dated posts (ids decode for free), social before web,
+    listings last; one web domain never floods, platforms get more room."""
     def score(c):
         s = {'exact': 0, 'text': 15, 'page': 20, 'similar': 30}.get(c['match'], 40)
+        tv = (c.get('thumb_check') or {}).get('verdict')
+        if tv == 'match':
+            s -= 40
+        elif tv == 'differs':
+            s += 60
         s -= 5 * min(len(c.get('engines') or []), 3)
         if c.get('crawl_date'):
             s -= 6
@@ -230,11 +264,12 @@ def rank_candidates(cands, per_domain=3, limit=40):
             s -= 4
         if urls.is_listing(c['url']):
             s += 40                      # listings are never origins: last
-        return s
+        return (s, date_hint(c) or '9999')
     out, per = [], {}
     for c in sorted(cands, key=score):
         d = urls.domain_of(c['url'])
-        if per.get(d, 0) >= per_domain:
+        cap = SOCIAL_PER_DOMAIN if urls.is_social(c['url']) else per_domain
+        if per.get(d, 0) >= cap:
             continue
         per[d] = per.get(d, 0) + 1
         out.append(c)

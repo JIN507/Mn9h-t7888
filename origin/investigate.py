@@ -18,14 +18,14 @@ import time
 
 import requests
 
-from origin import copies as copies_mod, dates, engines, report, urls, verify
+from origin import copies as copies_mod, dates, engines, prescreen, report, urls, verify
 from origin.budget import Budget
 
 logger = logging.getLogger(__name__)
 
 VERIFY_WORKERS = 10
-ROUND1_PAGES = 40
-ROUND2_PAGES = 20
+ROUND1_PAGES = 50
+ROUND2_PAGES = 24
 MAX_ROUNDS = 3
 NEW_COPIES_PER_ROUND = 2
 PER_DOMAIN = 3
@@ -181,9 +181,13 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
                 a.status = 'empty'
                 inv.engines[k] = a.brief()
 
-    # 2. verify round 1
-    cands = engines.rank_candidates(inv.new_candidates(answers), PER_DOMAIN, ROUND1_PAGES)
-    inv.rounds.append({'round': 1, 'candidates': len(cands)})
+    # 2. pre-screen thumbnails (no credits), then verify round 1
+    raw = inv.new_candidates(answers)
+    counts = prescreen.run(raw, inv.sigs, time_left_s=budget.time_left() - 60, progress=progress)
+    inv.engines['prescreen'] = {'status': 'results', 'count': counts.get('match', 0), 'credits': 0,
+                                'note': f"{counts.get('differs', 0)} rejected by thumbnail", 'copy_id': None}
+    cands = engines.rank_candidates(raw, PER_DOMAIN, max(ROUND1_PAGES, min(70, counts.get('match', 0))))
+    inv.rounds.append({'round': 1, 'candidates': len(raw), 'verified': len(cands)})
     inv.verify_many(cands, 1)
 
     # 3. rounds 2..3 on new copies
@@ -206,7 +210,9 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
                 tasks.append((f'lens_exact_ar@copy{c.id}', (lambda c=c: engines.lens_exact(c.url, 'ar', 'sa', c.id)), engines.LENS_CREDITS))
                 tasks.append((f'yandex@copy{c.id}', (lambda c=c: engines.yandex(c.url, c.id)), engines.YANDEX_CREDITS))
         answers = inv.run(tasks, timeout_s=50)
-        cands = engines.rank_candidates(inv.new_candidates(answers), PER_DOMAIN, ROUND2_PAGES)
+        raw = inv.new_candidates(answers)
+        prescreen.run(raw, inv.sigs, time_left_s=budget.time_left() - 40, progress=progress)
+        cands = engines.rank_candidates(raw, PER_DOMAIN, ROUND2_PAGES)
         inv.rounds.append({'round': rnd, 'copies': [c.id for c in new_copies], 'candidates': len(cands)})
         if cands:
             inv.verify_many(cands, rnd)

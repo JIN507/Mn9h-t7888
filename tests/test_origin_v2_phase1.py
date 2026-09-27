@@ -278,3 +278,36 @@ def test_investigate_rounds_with_fake_engines(monkeypatch):
     assert any(r.get('copies') for r in payload['rounds'])                       # round 2 ran on it
     links = [i['link'] for i in payload['timeline']]
     assert links[0] == 'https://x.com/orig/status/570514380095299584' and 'https://pin.example/pin/1' in links
+
+
+def test_rank_uses_date_hints_thumb_verdicts_and_social_cap():
+    cands = []
+    for i in range(15):
+        # 15 X posts with ascending ids => the EARLIEST (smallest snowflake) must come first
+        tid = 1814337329387175999 + i * 4194304000   # ~+1000 s each
+        cands.append({'url': f'https://x.com/u{i}/status/{tid}', 'engine': 'lens', 'match': 'exact',
+                      'engines': ['lens'], 'thumbs': []})
+    cands.append({'url': 'https://news.example/a', 'engine': 'lens', 'match': 'exact', 'engines': ['lens'], 'thumbs': [],
+                  'thumb_check': {'verdict': 'differs'}})
+    cands.append({'url': 'https://blog.example/b', 'engine': 'yandex', 'match': 'similar', 'engines': ['yandex'], 'thumbs': [],
+                  'thumb_check': {'verdict': 'match'}})
+    ranked = engines.rank_candidates(cands, per_domain=3, limit=20)
+    assert ranked[0]['url'] == 'https://blog.example/b'                       # thumbnail matched the photo
+    assert ranked[1]['url'] == 'https://x.com/u0/status/1814337329387175999'  # earliest post by id
+    assert sum(1 for c in ranked if 'x.com' in c['url']) == 12                # social cap, not 3
+    assert ranked[-1]['url'] == 'https://news.example/a'                      # thumbnail differs: last
+    assert engines.date_hint(cands[0]).startswith('2024-07-19T16:31:42')
+
+
+def test_prescreen_marks_thumbnail_matches(monkeypatch):
+    from origin import prescreen
+    photo = _textured(9)
+    sigs = [_sig(photo)]
+    imgs = {'https://t/match.jpg': photo.resize((320, 240)), 'https://t/other.jpg': _textured(10).resize((320, 240))}
+    monkeypatch.setattr(prescreen, '_fetch', lambda url: imgs[url])
+    cands = [{'url': 'https://a/1', 'thumbs': ['https://t/match.jpg']},
+             {'url': 'https://a/2', 'thumbs': ['https://t/other.jpg']},
+             {'url': 'https://a/3', 'thumbs': []}]
+    counts = prescreen.run(cands, sigs, time_left_s=60)
+    assert cands[0]['thumb_check']['verdict'] == 'match' and cands[1]['thumb_check']['verdict'] == 'differs'
+    assert cands[2]['thumb_check']['verdict'] == 'unknown' and counts['match'] == 1 and counts['differs'] == 1
