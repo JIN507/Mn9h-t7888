@@ -79,6 +79,7 @@ DEFAULT_BUDGET = {
 # An htmldate-only guess (0.80) on a dynamic page has repeatedly produced
 # false origins in live runs; such pages are reported as earlier_hints.
 FIRST_SEEN_MIN_CONFIDENCE = 0.84
+WEAK_DATE_CONFIDENCE = 0.5     # below this a date is a hint, not a timestamp (e.g. Last-Modified)
 THUMBNAIL_MIN_PX = 250
 # A low-res engine thumbnail can confirm a *variant* only if the perceptual
 # hash agrees too: semantic embeddings score look-alike scenes (another
@@ -924,6 +925,11 @@ def inspect_candidate(cand, query_sig, *, use_wayback=True, strict=False):
                 ('published_at', 'confidence', 'evidence', 'bound',
                  'is_upper_bound')})
     out['is_lower_bound'] = False
+    if out['published_at'] and out['confidence'] < WEAK_DATE_CONFIDENCE and not out.get('is_upper_bound'):
+        # A Last-Modified header or a stray number is not a publication date:
+        # keep it as a hint in the evidence, show the sighting as undated.
+        out['weak_date'] = out['published_at']
+        out['published_at'] = None
     if lower and (out['published_at'] is None or out['published_at'] < lower['date']):
         # The page's own date predates the image file: the image was added
         # later. All we know is "not before the upload month" — a lower

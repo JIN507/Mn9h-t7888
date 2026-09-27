@@ -41,7 +41,7 @@ DEFAULT_BUDGET = {
     'round0_inspect': 28,
     'auto_inspect': 8,        # pages auto-inspected after a reverse_search
     'per_domain': 3,
-    'soft_time_s': 240,
+    'soft_time_s': 300,
     'workers': 8,
 }
 

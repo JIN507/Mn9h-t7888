@@ -54,7 +54,7 @@ def earliest_capture(url):
     return result
 
 
-def archive_url(url, timeout=(10, 90)):
+def archive_url(url, timeout=(10, 25)):
     """Preserve the origin: return an archive.org URL for `url`. Uses an
     existing capture when there is one, otherwise asks Save Page Now
     (anonymous SPN is rate-limited and often answers 5xx — best effort).
