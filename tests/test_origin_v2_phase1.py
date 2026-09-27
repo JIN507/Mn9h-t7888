@@ -334,7 +334,8 @@ def test_identify_text_pool_queries_and_search(monkeypatch):
         'x_question': 'earliest X post of this photo', 'confidence': 'high'})
     ident = identify.identify('', titles, captions)
     assert ident['label'] == 'استنتاج' and identify.queries_of(ident) == [
-        'عبدالمجيد عبدالله نبيل شعيل راشد الماجد بيبسي صورة', 'Abdul Majeed Abdullah Nabeel Shuail Pepsi photo']
+        'عبدالمجيد عبدالله نبيل شعيل راشد الماجد بيبسي صورة', 'Abdul Majeed Abdullah Nabeel Shuail Pepsi photo',
+        'عبدالمجيد عبدالله نبيل شعيل راشد الماجد Pepsi can site:x.com']
 
     seen_q = []
     monkeypatch.setattr(engines, 'google_text', lambda q, hl='en', gl='us', num=20: seen_q.append((q, hl)) or
@@ -342,7 +343,8 @@ def test_identify_text_pool_queries_and_search(monkeypatch):
                                                                   'engine': 'text', 'match': 'text', 'copy_id': None}], 1))
     b = Budget(credits=12, seconds=60, pages=10)
     ans = identify.text_search(ident, b)
-    assert set(ans) == {'text1', 'text2'} and b.spent_credits == 2 and seen_q[0][1] == 'ar' and seen_q[1][1] == 'en'
+    assert set(ans) == {'text1', 'text2', 'text3'} and b.spent_credits == 3 and seen_q[0][1] == 'ar' and seen_q[1][1] == 'en'
+    assert seen_q[2][0].endswith('site:x.com')
 
     monkeypatch.setattr(xai, 'configured', lambda: True)
     monkeypatch.setattr(xai, 'search_origin', lambda img, q: {'urls': ['https://x.com/svs9111/status/570514380095299584', 'https://google.com/x'], 'text': 'ok'})

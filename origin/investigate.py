@@ -252,9 +252,13 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
     for label, ans in lead_answers.items():
         inv.engines[label] = ans.brief()
     if lead_answers and budget.time_left() > 15:
-        leads = inv.new_candidates(lead_answers)
-        leads = engines.rank_candidates(leads, PER_DOMAIN, IDENTIFY_PAGES)
-        inv.rounds.append({'round': 'identify', 'candidates': len(leads)})
+        all_leads = inv.new_candidates(lead_answers)
+        leads = engines.rank_candidates(all_leads, PER_DOMAIN, IDENTIFY_PAGES)
+        inv.rounds.append({'round': 'identify', 'candidates': len(all_leads), 'verified': len(leads)})
+        if os.environ.get('ORIGIN_DEBUG', '').lower() == 'true':
+            inv.extras.setdefault('debug', {})['leads'] = {
+                label: [c['url'] for c in ans.candidates][:25] for label, ans in lead_answers.items()}
+            inv.extras['debug']['leads_verified'] = [c['url'] for c in leads]
         if leads:
             inv.verify_many(leads, 4, time_cap=25)
     if ident['identity']:

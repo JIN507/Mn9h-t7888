@@ -103,11 +103,33 @@ def identify(description, titles, captions):
         return None
 
 
+def x_query(identity):
+    """An X-scoped Google query: the original post usually lives on X and
+    Lens rarely lists it; `site:x.com` with the event/names finds it."""
+    if not identity:
+        return None
+    core = ' '.join([p for p in (identity.get('people') or [])[:3]] or
+                    [identity.get('event') or '']).strip()
+    if not core:
+        return None
+    detail = (identity.get('detail') or '').strip()
+    if detail and detail.lower() not in core.lower():
+        core = f'{core} {detail}'
+    return f'{core} site:x.com'
+
+
 def queries_of(identity):
+    """Up to MAX_QUERIES: best Arabic query, best English query, X-scoped."""
     if not identity:
         return []
     qs = []
-    for q in (identity.get('queries_ar') or [])[:2] + (identity.get('queries_en') or [])[:1]:
+    for q in (identity.get('queries_ar') or [])[:1] + (identity.get('queries_en') or [])[:1]:
+        if q and q not in qs:
+            qs.append(q)
+    xq = x_query(identity)
+    if xq and xq not in qs:
+        qs.append(xq)
+    for q in (identity.get('queries_ar') or [])[1:2]:
         if q and q not in qs:
             qs.append(q)
     return qs[:MAX_QUERIES]
@@ -137,14 +159,17 @@ def grok_search(identity, image_bytes, progress=None):
         from providers import xai
         if not xai.configured():
             return engines.EngineAnswer(name, 'skipped', note='not configured')
-        q = (identity or {}).get('x_question') or None
-        if not q:
-            people = ', '.join((identity or {}).get('people') or [])
-            event = (identity or {}).get('event') or ''
-            if not (people or event):
-                return engines.EngineAnswer(name, 'skipped', note='nothing identified')
-            q = f'Find the earliest X (Twitter) post of this exact photo: {people} {event}.'
-        q += ' Search X and the web. List every URL you actually retrieved, with its date.'
+        people = ', '.join((identity or {}).get('people') or [])
+        event = (identity or {}).get('event') or ''
+        detail = (identity or {}).get('detail') or ''
+        if not (people or event):
+            return engines.EngineAnswer(name, 'skipped', note='nothing identified')
+        q = ((identity or {}).get('x_question') or
+             f'Find the earliest X (Twitter) post of this exact photo: {people} {event}.')
+        q += (f' Visible detail: {detail}.' if detail else '')
+        q += (' Search X first: look for the ORIGINAL poster — the official account, agency, '
+              'outlet or eyewitness that published it first — then reposts. Return only URLs you '
+              'actually retrieved, as full x.com/<user>/status/<id> links or article links, each with its date.')
         if progress:
             progress('سؤال Grok عن أول منشور على X...')
         res = xai.search_origin(image_bytes or '', q)
