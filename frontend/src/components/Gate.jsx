@@ -71,7 +71,7 @@ export function GateScreen({ onEnter }) {
     };
 
     // target positions for the gathered word (RTL: ت on the right)
-    const spacing = 44;
+    const spacing = 38;
     const target = (slot) => ({ x: anchor.x + (1.5 - slot) * spacing, y: anchor.y });
     const gathered = phase === 'gather' || phase === 'leave';
 
@@ -91,6 +91,9 @@ export function GateScreen({ onEnter }) {
                     };
                 return <span key={g.id} className={`gate-glyph ${leads ? 'lead' : ''}`} style={style}>{g.ch}</span>;
             })}
+
+            {/* the connected word the letters become */}
+            <span className="gate-gathered" style={{ left: anchor.x, top: anchor.y }}>تحقق</span>
 
             <form ref={formRef} onSubmit={submit} className="gate-card" autoComplete="off">
                 <div className="gate-title">
