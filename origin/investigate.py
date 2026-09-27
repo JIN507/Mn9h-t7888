@@ -18,7 +18,9 @@ import time
 
 import requests
 
-from origin import copies as copies_mod, dates, engines, prescreen, report, urls, verify
+import threading
+
+from origin import copies as copies_mod, dates, engines, identify, prescreen, report, urls, verify
 from origin.budget import Budget
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,8 @@ PRESCREEN_TIME = 15
 MAX_ROUNDS = 3
 NEW_COPIES_PER_ROUND = 2
 PER_DOMAIN = 3
+TEXT_RESERVE = 3          # credits kept for the identification track's text queries
+IDENTIFY_PAGES = 16
 
 
 def _noop(_msg):
@@ -199,7 +203,13 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
                                'candidates': [c['url'] for c in raw][:400]}
     inv.verify_many(cands, 1)
 
-    # 3. rounds 2..3 on new copies
+    # 3. identification track starts now (LLM + text + Grok) and runs while
+    #    rounds 2-3 search with the copies found on verified pages
+    ident = {'identity': None, 'answers': {}, 'description': ''}
+    ident_thread = threading.Thread(target=_identification_track,
+                                    args=(inv, data, raw, ident), daemon=True)
+    ident_thread.start()
+
     for rnd in range(2, MAX_ROUNDS + 1):
         if budget.time_left() < 35:
             budget.skip(f'round {rnd}', 'time')
@@ -208,16 +218,21 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
         new_copies = [c for c in new_copies if c.source in ('page', 'platform')]
         if not new_copies:
             break
+        # keep credits for the text queries: one Lens exact per copy, Arabic + Yandex on the first only
+        spare = budget.credits - budget.spent_credits - TEXT_RESERVE
+        if spare < 1:
+            budget.skip(f'round {rnd}', 'credits reserved for text search')
+            break
         progress('عُثر على نسخة أصلية — إعادة البحث بها...')
         tasks = []
         for i, c in enumerate(new_copies):
+            if len(tasks) >= spare:
+                break
             cs.mark(c, 'lens_exact_en')
             tasks.append((f'lens_exact_en@copy{c.id}', (lambda c=c: engines.lens_exact(c.url, 'en', 'us', c.id)), engines.LENS_CREDITS))
-            if i == 0:
+            if i == 0 and rnd == 2 and len(tasks) < spare:
                 cs.mark(c, 'lens_exact_ar')
-                cs.mark(c, 'yandex')
                 tasks.append((f'lens_exact_ar@copy{c.id}', (lambda c=c: engines.lens_exact(c.url, 'ar', 'sa', c.id)), engines.LENS_CREDITS))
-                tasks.append((f'yandex@copy{c.id}', (lambda c=c: engines.yandex(c.url, c.id)), engines.YANDEX_CREDITS))
         answers = inv.run(tasks, timeout_s=50)
         raw = inv.new_candidates(answers)
         prescreen.run(engines.rank_candidates(raw, PER_DOMAIN * 4, 120), inv.sigs,
@@ -229,7 +244,22 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
         if cands:
             inv.verify_many(cands, rnd)
 
-    # 4. identification + text search: phase 2
+    # 4. collect the identification track's leads and verify them
+    ident_thread.join(timeout=max(5, min(45, budget.time_left() - 20)))
+    if ident_thread.is_alive():
+        budget.skip('identification', 'time')
+    lead_answers = ident['answers']
+    for label, ans in lead_answers.items():
+        inv.engines[label] = ans.brief()
+    if lead_answers and budget.time_left() > 15:
+        leads = inv.new_candidates(lead_answers)
+        leads = engines.rank_candidates(leads, PER_DOMAIN, IDENTIFY_PAGES)
+        inv.rounds.append({'round': 'identify', 'candidates': len(leads)})
+        if leads:
+            inv.verify_many(leads, 4, time_cap=25)
+    if ident['identity']:
+        inv.extras['identity'] = ident['identity']
+        inv.extras['identity']['description'] = ident.get('description') or None
 
     # 5. decide
     progress('تحديد أول ظهور...')
@@ -237,6 +267,25 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
                            extras={**inv.extras, 'rounds': inv.rounds})
     progress('اكتمل تحليل المصدر')
     return payload
+
+
+def _identification_track(inv, image_bytes, candidates, out):
+    """Background: describe (optional) -> identify from titles/captions ->
+    text queries -> one Grok question. Answers land in out['answers']."""
+    try:
+        out['description'] = identify.describe(image_bytes)
+        titles, captions = identify.text_pool(candidates, inv.sightings)
+        identity = identify.identify(out['description'], titles, captions)
+        out['identity'] = identity
+        if not identity:
+            inv.budget.skip('identification', 'nothing identified')
+            return
+        answers = identify.text_search(identity, inv.budget, progress=inv.progress)
+        if inv.budget.time_left() > 30:
+            answers['grok'] = identify.grok_search(identity, image_bytes, progress=inv.progress)
+        out['answers'] = answers
+    except Exception as e:
+        logger.exception('identification track crashed: %s', e)
 
 
 def _unavailable(note, budget):

@@ -311,3 +311,91 @@ def test_prescreen_marks_thumbnail_matches(monkeypatch):
     counts = prescreen.run(cands, sigs, time_left_s=60)
     assert cands[0]['thumb_check']['verdict'] == 'match' and cands[1]['thumb_check']['verdict'] == 'differs'
     assert cands[2]['thumb_check']['verdict'] == 'unknown' and counts['match'] == 1 and counts['differs'] == 1
+
+
+# ------------------------------------------------------------ phase 2: identification
+
+def test_identify_text_pool_queries_and_search(monkeypatch):
+    from origin import identify
+    from providers import deepseek, xai
+    cands = [{'url': 'https://x.com/a/status/1', 'title': 'ذكريات الماضي on X: الفنان عبدالمجيد عبدالله والفنان نبيل شعيل'},
+             {'url': 'https://lens.google.com/x', 'title': 'junk'},
+             {'url': 'https://p.example/2', 'title': 'Discover 17 ideas'}]
+    sights = [{'image': verify.ImageEvidence(level='platform'), 'caption': 'صورة قديمة ل عبدالمجيد عبدالله و نبيل شعيل و راشد الماجد', 'title': 't'},
+              {'image': verify.ImageEvidence(level='none'), 'caption': 'ignored', 'title': 'ignored'}]
+    titles, captions = identify.text_pool(cands, sights)
+    assert len(titles) == 2 and 'junk' not in titles and captions == ['صورة قديمة ل عبدالمجيد عبدالله و نبيل شعيل و راشد الماجد', 't']
+
+    monkeypatch.setattr(deepseek, 'configured', lambda: True)
+    monkeypatch.setattr(deepseek, 'chat_json', lambda system, user, **k: {
+        'people': ['عبدالمجيد عبدالله', 'نبيل شعيل', 'راشد الماجد'], 'place': None, 'place_ar': None,
+        'event': None, 'event_ar': None, 'detail': 'Pepsi can',
+        'queries_ar': ['عبدالمجيد عبدالله نبيل شعيل راشد الماجد بيبسي صورة'], 'queries_en': ['Abdul Majeed Abdullah Nabeel Shuail Pepsi photo'],
+        'x_question': 'earliest X post of this photo', 'confidence': 'high'})
+    ident = identify.identify('', titles, captions)
+    assert ident['label'] == 'استنتاج' and identify.queries_of(ident) == [
+        'عبدالمجيد عبدالله نبيل شعيل راشد الماجد بيبسي صورة', 'Abdul Majeed Abdullah Nabeel Shuail Pepsi photo']
+
+    seen_q = []
+    monkeypatch.setattr(engines, 'google_text', lambda q, hl='en', gl='us', num=20: seen_q.append((q, hl)) or
+                        engines.EngineAnswer('text', 'results', [{'url': 'https://x.com/svs9111/status/570514380095299584',
+                                                                  'engine': 'text', 'match': 'text', 'copy_id': None}], 1))
+    b = Budget(credits=12, seconds=60, pages=10)
+    ans = identify.text_search(ident, b)
+    assert set(ans) == {'text1', 'text2'} and b.spent_credits == 2 and seen_q[0][1] == 'ar' and seen_q[1][1] == 'en'
+
+    monkeypatch.setattr(xai, 'configured', lambda: True)
+    monkeypatch.setattr(xai, 'search_origin', lambda img, q: {'urls': ['https://x.com/svs9111/status/570514380095299584', 'https://google.com/x'], 'text': 'ok'})
+    g = identify.grok_search(ident, b'img')
+    assert g.status == 'results' and len(g.candidates) == 1 and g.credits == 0
+    monkeypatch.setattr(xai, 'search_origin', lambda img, q: {'error': 'no credits', 'urls': []})
+    assert identify.grok_search(ident, b'img').status == 'error'
+    monkeypatch.setattr(xai, 'configured', lambda: False)
+    assert identify.grok_search(ident, b'img').status == 'skipped'
+
+
+def test_investigate_identification_track_reaches_the_x_post(monkeypatch):
+    """Engines never return the X post (as with the Maersk photo); the
+    identification track's text search does; it gets verified and wins."""
+    from origin import investigate as inv_mod, identify
+    photo = _textured(8, (1000, 700))
+    upload = _jpeg(photo)
+    monkeypatch.setenv('SERPAPI_API_KEY', 'k')
+    monkeypatch.setenv('SCREENSHOT_CROP', 'false')
+    monkeypatch.setattr(inv_mod, '_download', lambda url: upload)
+    monkeypatch.setattr(cp, 'host_bytes', lambda data, hint='x': f'https://pub.example/{hint}.jpg')
+    monkeypatch.setattr(cp, 'public_url_for_hosted', lambda u: 'https://pub.example/upload.jpg')
+    monkeypatch.setattr(engines, 'lens_exact', lambda url, hl='en', country='us', copy_id=None, no_cache=False:
+                        engines.EngineAnswer(f'lens_exact_{hl}', 'results', [
+                            {'url': 'https://news.example/story', 'engine': 'lens', 'match': 'exact', 'copy_id': copy_id,
+                             'title': 'Indian Coast Guard battles fire on Maersk Frankfurt'}], 1, copy_id=copy_id))
+    monkeypatch.setattr(engines, 'lens_visual', lambda url, hl='en', country='us', copy_id=None, no_cache=False:
+                        engines.EngineAnswer('lens_visual', 'empty', [], 1, copy_id=copy_id))
+    monkeypatch.setattr(engines, 'yandex', lambda url, copy_id=None: engines.EngineAnswer('yandex', 'empty', [], 1, copy_id=copy_id))
+    monkeypatch.setattr(engines, 'tineye', lambda url, copy_id=None: engines.EngineAnswer('tineye', 'skipped', note='not configured'))
+    monkeypatch.setattr(identify, 'describe', lambda b: 'a container ship on fire')
+    monkeypatch.setattr(identify, 'identify', lambda d, t, c: {'people': [], 'event': 'Maersk Frankfurt fire', 'event_ar': 'حريق سفينة',
+                                                               'queries_ar': ['حريق سفينة ميرسك فرانكفورت صورة'], 'queries_en': ['Maersk Frankfurt fire Indian Coast Guard photo'],
+                                                               'x_question': 'earliest post', 'label': 'استنتاج'})
+    monkeypatch.setattr(engines, 'google_text', lambda q, hl='en', gl='us', num=20: engines.EngineAnswer('text', 'results', [
+        {'url': 'https://x.com/IndiaCoastGuard/status/1814337329387175999', 'engine': 'text', 'match': 'text', 'copy_id': None}], 1))
+    monkeypatch.setattr(identify, 'grok_search', lambda ident, b, progress=None: engines.EngineAnswer('grok', 'skipped', note='not configured'))
+
+    def fake_verify(url, sigs, engine_thumbs=(), **k):
+        v = {'url': url, 'image': verify.ImageEvidence(), 'html': '<html></html>', 'headers': None, 'title': 't',
+             'caption': None, 'created_at': None, 'extra_dates': [], 'tweet': None, 'matched_pil': None, 'fetch_error': False}
+        if 'news.example' in url:
+            v['image'] = verify.ImageEvidence(level='page', kind='exact', matched_url='https://news.example/i.jpg', width=1200, height=800)
+            v['html'] = '<html><head><meta property="article:published_time" content="2024-07-19T19:20:46+00:00"></head></html>'
+        if 'IndiaCoastGuard' in url:
+            v['image'] = verify.ImageEvidence(level='platform', kind='variant', matched_url='https://pbs.example/icg.jpg', width=1024, height=768, inliers=235)
+            v['tweet'] = {'created_at': '2024-07-19T16:31:42.000Z', 'text': 'ICG ships fighting fire'}
+        return v
+    monkeypatch.setattr(verify, 'verify_page', fake_verify)
+
+    payload = inv_mod.investigate('https://r2/upload.jpg?X-Amz=1', progress=lambda m: None)
+    assert payload['first_seen']['link'] == 'https://x.com/IndiaCoastGuard/status/1814337329387175999'
+    assert payload['first_seen']['published_at'].startswith('2024-07-19T16:31:42')
+    assert payload['identity']['event'] == 'Maersk Frankfurt fire' and payload['identity']['label'] == 'استنتاج'
+    assert payload['engines']['text1']['status'] == 'results' and payload['budget']['credits'] <= 12
+    assert any(r.get('round') == 'identify' for r in payload['rounds'])
