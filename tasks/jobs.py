@@ -156,7 +156,10 @@ def run_direct_search(query=None, image_url=None, user_id=None,
                    ('timeline', 'engine', 'first_seen', 'narrative',
                     'engines', 'stats', 'rounds', 'note', 'agent',
                     'earlier_hints', 'scenes', 'video_summary',
-                    'forensics', 'internal_sightings')}
+                    'forensics', 'internal_sightings',
+                    # v2 fields
+                    'version', 'first_seen_exact', 'version_note', 'leads',
+                    'copies', 'budget', 'identity', 'screenshot')}
             origin['search_id'] = persist_search(
                 user_id, 'direct', query=None, image_url=image_url,
                 image_hash=image_hash, image_phash=image_phash,
@@ -267,12 +270,10 @@ def _run_origin_engine(image_url, extra_image_urls=None):
             from origin.investigate import investigate as v2_investigate
             report = v2_investigate(image_url, progress=_progress,
                                     extra_frame_urls=extra_image_urls)
-            if not report.get('success'):
-                logger.warning('origin v2 unavailable (%s); using v1', report.get('note'))
-                use_v2 = False
-        if use_v2:
-            pass
-        elif use_agent:
+            if report.get('success'):
+                return report                     # already payload-shaped
+            logger.warning('origin v2 unavailable (%s); using v1', report.get('note'))
+        if use_agent:
             report = agent_investigate(image_url, progress=_progress,
                                        extra_frame_urls=extra_image_urls)
         else:
