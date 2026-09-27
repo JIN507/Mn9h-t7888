@@ -40,10 +40,15 @@ def test_original_image_for_pivot_prefers_largest_page_copy():
                       'geometry': {'same_scene': True}, 'matched_image_url': 'https://thumb/x.jpg'},
            'image_size': [2000, 2000]}]
     assert oe.original_image_for_pivot(tl) == 'https://a/big.jpg'
-    assert oe.original_images_for_pivot(tl) == ['https://a/big.jpg']            # one per host
     tl.append({'visual': {'verdict': 'confirmed', 'match_kind': 'variant', 'matched_from': 'page',
                           'geometry': {'same_scene': True}, 'matched_image_url': 'https://b/other.jpg'},
                'image_size': [500, 500]})
-    assert oe.original_images_for_pivot(tl) == ['https://a/big.jpg', 'https://b/other.jpg']
+    # largest first, at most two per host, engine thumbnails never
+    assert oe.original_images_for_pivot(tl) == ['https://a/big.jpg', 'https://b/other.jpg', 'https://a/small.jpg']
+    assert oe.original_images_for_pivot(tl, exclude={'https://a/big.jpg'}) == ['https://b/other.jpg', 'https://a/small.jpg']
+    tl.append({'visual': {'verdict': 'confirmed', 'match_kind': 'variant', 'matched_from': 'page',
+                          'geometry': {'same_scene': True}, 'matched_image_url': 'https://a/mid.jpg'},
+               'image_size': [700, 700]})
+    assert oe.original_images_for_pivot(tl) == ['https://a/big.jpg', 'https://a/mid.jpg', 'https://b/other.jpg']
     tl.append({'visual': {'verdict': 'confirmed', 'match_kind': 'exact', 'matched_image_url': 'https://a/same.jpg'}})
     assert oe.original_image_for_pivot(tl) is None

@@ -1091,13 +1091,16 @@ def earlier_hints(timeline, first_seen, limit=5):
 
 # ------------------------------------------------------------------- expand
 
-def original_images_for_pivot(timeline, limit=3):
+PIVOT_PER_HOST = 2
+
+
+def original_images_for_pivot(timeline, limit=3, exclude=()):
     """When the query is a derivative (cropped / restored / recoloured) of
     a photo found on some page, the pages' full-size copies are closer to
     the ORIGINAL file that the exact-match indexes know. Returns up to
-    `limit` distinct copies (largest first, one per host) — different
-    copies surface different exact matches — or [] when the query already
-    matched exactly somewhere."""
+    `limit` distinct copies (largest first, at most PIVOT_PER_HOST per
+    host, none from `exclude`) — different copies surface different exact
+    matches — or [] when the query already matched exactly somewhere."""
     if any((i.get('visual') or {}).get('match_kind') == 'exact' for i in timeline):
         return []
     pool = [i for i in timeline
@@ -1106,14 +1109,14 @@ def original_images_for_pivot(timeline, limit=3):
             and i['visual'].get('matched_image_url')
             and i['visual'].get('matched_from') == 'page']
     pool.sort(key=lambda i: -(i['image_size'][0] * i['image_size'][1]) if i.get('image_size') else 0)
-    out, hosts = [], set()
+    out, per_host = [], {}
     for i in pool:
         url = i['visual']['matched_image_url']
         host = domain_of(url)
-        if url in out or host in hosts:
+        if url in out or url in exclude or per_host.get(host, 0) >= PIVOT_PER_HOST:
             continue
         out.append(url)
-        hosts.add(host)
+        per_host[host] = per_host.get(host, 0) + 1
         if len(out) >= limit:
             break
     return out

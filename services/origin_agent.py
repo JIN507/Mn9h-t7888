@@ -128,7 +128,10 @@ SYSTEM_PROMPT = (
     'host refused it): that is missing evidence, not a zero. '
     'lens_visual_titles / other engines\' page titles often name the people, '
     'place or event: use those names in web_search (Arabic and English) — '
-    'named text search finds the original post more often than any engine.'
+    'named text search finds the original post more often than any engine. '
+    'Every web_search query must pair the names with ONE distinctive visible '
+    'detail of the image (a brand, a sign, an object, a caption word): '
+    '"<names> <detail> صورة" — names alone return biographies, not the post.'
 )
 
 TOOLS = [
@@ -260,6 +263,7 @@ class Investigation:
     def __init__(self, image_url, query_sig, progress, budget):
         self.image_url = image_url
         self.alternates = ()         # other public URLs of the query image
+        self.pivoted = set()         # original copies already searched with Lens
         self.image_bytes = None
         self.extra_frames = []
         self.query_sig = query_sig
@@ -460,7 +464,7 @@ def tool_web_search(inv, query, lang='auto'):
     gl, hl = ('sa', 'ar') if lang == 'ar' else ('us', 'en')
     inv.progress(f'الوكيل: بحث نصي «{query[:40]}»')
     try:
-        items = oe.text_search_results(query, hl=hl, gl=gl, num=10)
+        items = oe.text_search_results(query, hl=hl, gl=gl, num=20)
     except Exception as e:
         return {'error': f'search failed: {e}'}
     resolved = resolve_redirects([i['link'] for i in items])
@@ -585,6 +589,42 @@ def _summ(tool, args, result):
     return ''
 
 
+MAX_AUTO_PIVOTS = 4
+
+
+def _auto_pivot(inv, image_context, limit=3):
+    """The query is a derivative of a photo some page holds in full: the
+    exact-match indexes know the ORIGINAL, so search Lens with those copies
+    (up to `limit` new ones per call, MAX_AUTO_PIVOTS overall). Runs after
+    round 0 and again whenever later tool calls surface new original
+    copies. Returns the number of pages inspected."""
+    room = MAX_AUTO_PIVOTS - len(inv.pivoted)
+    if room <= 0 or inv.time_left() < 60:
+        return 0
+    pivots = oe.original_images_for_pivot(inv.timeline, limit=min(limit, room), exclude=inv.pivoted)
+    if not pivots:
+        return 0
+    inv.progress('الصورة نسخة معدّلة — إعادة البحث بالصورة الأصلية...')
+    raw = []
+    for pivot in pivots:
+        first = not inv.pivoted
+        inv.pivoted.add(pivot)
+        n = len(inv.pivoted)
+        for name in (('lens_exact_en', 'lens_exact_ar') if first else ('lens_exact_en',)):
+            got, st = oe.harvest_engine(name, pivot)
+            inv.engines_status[f'{name}@pivot{n if n > 1 else ""}'] = dict(st, pivot_image=pivot, auto=True)
+            raw.extend(got)
+    new = inv.add_candidates(raw, round_no=len(inv.steps))
+    if isinstance(image_context, dict):
+        image_context['query_is_derivative_of'] = sorted(inv.pivoted)
+    if not new:
+        return 0
+    oe.prescreen_candidates(new, inv.query_sig, inv.progress, limit=150)
+    more = oe.prioritize(new, 16, inv.budget['per_domain'])
+    inv.progress(f'{len(new)} مرشحاً من الصورة الأصلية — فحص {len(more)} صفحة...')
+    return len(inv.inspect(more))
+
+
 def run_agent(inv, image_context):
     """The tool loop. Returns the model's finish args (or None)."""
     messages = [
@@ -650,10 +690,17 @@ def run_agent(inv, image_context):
                 logger.exception('agent tool %s crashed', name)
                 result = {'error': str(e)[:200]}
             if name != 'finish':
+                # new original copies found by this tool? search Lens with them
+                pivot_inspected = _auto_pivot(inv, image_context)
+                if pivot_inspected:
+                    result['auto_pivot_inspected_pages'] = pivot_inspected
                 result['current_findings'] = inv.findings(limit=6)
-            inv.steps.append({'n': len(inv.steps) + 1, 'tool': name, 'args': args,
-                              'summary': _summ(name, args, result),
-                              'elapsed_s': round(time.monotonic() - t0, 1)})
+            step = {'n': len(inv.steps) + 1, 'tool': name, 'args': args,
+                    'summary': _summ(name, args, result),
+                    'elapsed_s': round(time.monotonic() - t0, 1)}
+            if isinstance(result.get('leads'), list):
+                step['leads'] = [l.get('url') for l in result['leads'] if isinstance(l, dict)][:12]
+            inv.steps.append(step)
             messages.append({'role': 'tool', 'tool_call_id': call.get('id'),
                              'content': json.dumps(result, ensure_ascii=False)[:7000]})
             if finish is not None:
@@ -826,23 +873,7 @@ def investigate(image_url, *, progress=None, budget=None, extra_frame_urls=None)
     inv.inspect(chosen)
     # The query is a derivative of a photo some page holds in full: the
     # exact-match indexes know the ORIGINAL, so search with it right away.
-    pivots = oe.original_images_for_pivot(inv.timeline)
-    if pivots and inv.time_left() > 60:
-        progress('الصورة نسخة معدّلة — إعادة البحث بالصورة الأصلية...')
-        raw = []
-        for n, pivot in enumerate(pivots):
-            for name in (('lens_exact_en', 'lens_exact_ar') if n == 0 else ('lens_exact_en',)):
-                got, st = oe.harvest_engine(name, pivot)
-                inv.engines_status[f'{name}@pivot{n + 1 if n else ""}'] = dict(st, pivot_image=pivot, auto=True)
-                raw.extend(got)
-        new = inv.add_candidates(raw, round_no=0)
-        if new:
-            oe.prescreen_candidates(new, query_sig, progress, limit=150)
-            more = oe.prioritize(new, 16, budget['per_domain'])
-            progress(f'{len(new)} مرشحاً من الصورة الأصلية — فحص {len(more)} صفحة...')
-            inv.inspect(more)
-        if isinstance(image_context, dict):
-            image_context['query_is_derivative_of'] = pivots
+    _auto_pivot(inv, image_context)
     round0_first = inv.first_seen()
 
     finish = run_agent(inv, image_context)
