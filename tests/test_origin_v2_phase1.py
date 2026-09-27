@@ -401,3 +401,16 @@ def test_investigate_identification_track_reaches_the_x_post(monkeypatch):
     assert payload['identity']['event'] == 'Maersk Frankfurt fire' and payload['identity']['label'] == 'استنتاج'
     assert payload['engines']['text1']['status'] == 'results' and payload['budget']['credits'] <= 12
     assert any(r.get('round') == 'identify' for r in payload['rounds'])
+
+
+def test_round_one_leaves_pages_for_later_rounds():
+    from origin import investigate as inv_mod
+    b = Budget(seconds=60, credits=12, pages=50)
+    inv = inv_mod.Investigation('https://img', lambda m: None, b)
+    inv.sigs = [object()]
+    inv._verify_one = lambda c, r: None
+    cands = [{'url': f'https://s{i}.example/p', 'canonical': f'https://s{i}.example/p'} for i in range(60)]
+    inv.verify_many(cands, 1, reserve=30)
+    assert b.spent_pages == 20 and b.skipped[0]['step'] == 'verify round 1' and 'not fetched' in b.skipped[0]['reason']
+    inv.verify_many(cands[:25], 4, time_cap=5)
+    assert b.spent_pages == 45                         # later rounds still get their pages

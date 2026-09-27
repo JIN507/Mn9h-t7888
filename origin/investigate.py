@@ -36,6 +36,7 @@ NEW_COPIES_PER_ROUND = 2
 PER_DOMAIN = 3
 TEXT_RESERVE = 3          # credits kept for the identification track's text queries
 IDENTIFY_PAGES = 16
+LATER_PAGES_RESERVE = 30  # page fetches round 1 must leave for rounds 2-3 and the identification leads
 
 
 def _noop(_msg):
@@ -73,8 +74,13 @@ class Investigation:
         return answers
 
     # -- verification
-    def verify_many(self, cands, round_no, time_cap=None):
-        allowed = self.budget.take_pages(len(cands))
+    def verify_many(self, cands, round_no, time_cap=None, reserve=0):
+        wanted = len(cands)
+        if reserve:
+            wanted = min(wanted, max(0, self.budget.pages - self.budget.spent_pages - reserve))
+        allowed = self.budget.take_pages(wanted)
+        if allowed < len(cands):
+            self.budget.skip(f'verify round {round_no}', f'pages: {len(cands) - allowed} not fetched')
         cands = cands[:allowed]
         if not cands:
             return []
@@ -201,7 +207,7 @@ def investigate(image_url, *, progress=None, extra_frame_urls=None):
     if os.environ.get('ORIGIN_DEBUG', '').lower() == 'true':
         inv.extras['debug'] = {'ranked': [c['url'] for c in cands],
                                'candidates': [c['url'] for c in raw][:400]}
-    inv.verify_many(cands, 1)
+    inv.verify_many(cands, 1, reserve=LATER_PAGES_RESERVE)
 
     # 3. identification track starts now (LLM + text + Grok) and runs while
     #    rounds 2-3 search with the copies found on verified pages

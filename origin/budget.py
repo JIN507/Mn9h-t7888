@@ -19,7 +19,7 @@ class Budget:
         self.credits = int(credits if credits is not None else os.environ.get(
             'ORIGIN_CREDITS_VIDEO' if video else 'ORIGIN_CREDITS', 20 if video else 12))
         self.pages = int(pages if pages is not None else os.environ.get(
-            'ORIGIN_PAGES_VIDEO' if video else 'ORIGIN_PAGES', 90 if video else 60))
+            'ORIGIN_PAGES_VIDEO' if video else 'ORIGIN_PAGES', 120 if video else 90))
         self.started = time.monotonic()
         self.spent_credits = 0
         self.spent_pages = 0
