@@ -62,16 +62,39 @@ export function buildTextReportHtml(result, text, { appName = 'تحقق' } = {})
   <h2>النص مع التحليل التفصيلي</h2>
   ${body}
   <footer>أُنتج هذا التقرير بواسطة ${appName}. نتيجة كشف النصوص تقديرية وتعتمد على نموذج إحصائي؛ يُنصح بدمجها مع أدلة أخرى قبل إصدار حكم.</footer>
-  <script>window.addEventListener('load', () => { setTimeout(() => window.print(), 250); });</script>
 </body></html>`;
 }
 
 export function printTextReport(result, text, opts) {
+    /* A hidden iframe in the same document: no popup (nothing for a blocker
+       to block, and window.open with noopener returns null), then the
+       browser's print dialog where "Save as PDF" writes the file. */
     const html = buildTextReportHtml(result, text, opts);
-    const w = window.open('', '_blank', 'noopener,width=900,height=1000');
-    if (!w) return false;
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
-    return true;
+    try {
+        const old = document.getElementById('text-report-print-frame');
+        if (old) old.remove();
+        const frame = document.createElement('iframe');
+        frame.id = 'text-report-print-frame';
+        frame.setAttribute('aria-hidden', 'true');
+        frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+        document.body.appendChild(frame);
+        const doc = frame.contentDocument || frame.contentWindow.document;
+        doc.open();
+        doc.write(html);
+        doc.close();
+        const go = () => {
+            try {
+                frame.contentWindow.focus();
+                frame.contentWindow.print();
+            } catch (e) {
+                console.error('print failed', e);
+            }
+        };
+        if (doc.readyState === 'complete') setTimeout(go, 150);
+        else frame.onload = () => setTimeout(go, 150);
+        return true;
+    } catch (e) {
+        console.error('report export failed', e);
+        return false;
+    }
 }
