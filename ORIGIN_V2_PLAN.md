@@ -207,3 +207,22 @@ job runs; no push without Faisal's word.
 2. **Benchmark images** — 6+ images/clips with known first source.
 3. **Deletion** — v1 files are deleted at the end of phase 4, only after the gate passes. Confirm.
 4. **Credits** — accept 12 credits per image investigation (≈ 80 investigations/month on the current plan), or upgrade SerpAPI.
+
+---
+
+## 11. Stress test of the plan (done before phase 0) — risks and the answers built in
+
+| Risk | Answer in the design |
+|---|---|
+| Copy closure runs away | Rounds capped at 3; at most 2 new copies searched per round; copies deduped at pHash ≤ 4; min side 400 px |
+| Google refuses the file (AI-processed, some screenshots) | Small 512 px copy retried automatically; **Vision Web Detection takes bytes** and never touches Google's URL fetcher; TinEye website can take an upload through the browser |
+| Lens results differ per call | Independent draws: two locales, two copies, Yandex, Vision, TinEye; the report shows which engines answered so the user knows the coverage |
+| JS-only platforms hide the image | Platform media endpoints: X syndication, Instagram /media, Facebook crawler UA, Telegram embed, YouTube storyboard, **TikTok oEmbed thumbnail** (added). Pages we still cannot see become leads, never origins |
+| Wrong identification (Lens chip named a look-alike singer) | Identity is labeled "استنتاج", drives text queries only, never the origin decision |
+| Structured dates that lie (Pinterest served a fresh date once) | Origin needs image evidence *and* a platform ID or structured date; listing/profile pages are never origins; same-day ties settled by date level |
+| Time budget | Everything inside a round runs in parallel; identification runs alongside round 2; archive save moves to a background thread after the report is returned |
+| Credits | Metered per call; the orchestrator refuses a round that would exceed the cap; the report shows credits spent |
+| Google text ranking drifts | Three queries (ar + en) each with one distinctive detail; results only add leads that still must verify |
+| Regressions during the rebuild | Seed benchmark from cases we already have (Maersk, restored singers photo, Abha clip, Instagram screenshot); baseline taken from the existing run logs, not new v1 runs (saves ~100 credits); Faisal tests independently |
+
+Alternatives considered and rejected: refactoring v1 in place (the rule pile is the problem); a browser-driven LLM agent reading screenshots (slow, CAPTCHA-bound, costly per step); paid Bing Visual Search API (Azure, low added value over Lens + Yandex). Optional upgrade later: the TinEye API (paid, bytes upload, crawl dates for every copy).
