@@ -605,15 +605,35 @@ def _auto_pivot(inv, image_context, limit=3):
     if not pivots:
         return 0
     inv.progress('الصورة نسخة معدّلة — إعادة البحث بالصورة الأصلية...')
-    raw = []
+    # Lens answers differ from call to call for the same URL: both locales
+    # for every copy, a visual pass on the first, all in parallel.
+    tasks = []
     for pivot in pivots:
         first = not inv.pivoted
         inv.pivoted.add(pivot)
         n = len(inv.pivoted)
-        for name in (('lens_exact_en', 'lens_exact_ar') if first else ('lens_exact_en',)):
-            got, st = oe.harvest_engine(name, pivot)
-            inv.engines_status[f'{name}@pivot{n if n > 1 else ""}'] = dict(st, pivot_image=pivot, auto=True)
+        names = ['lens_exact_en', 'lens_exact_ar'] + (['lens_visual'] if first else [])
+        for name in names:
+            tasks.append((f'{name}@pivot{n if n > 1 else ""}', name, pivot))
+    raw = []
+    import concurrent.futures
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=len(tasks))
+    futures = {ex.submit(oe.harvest_engine, name, pivot): (key, pivot) for key, name, pivot in tasks}
+    try:
+        for fut in concurrent.futures.as_completed(futures, timeout=75):
+            key, pivot = futures[fut]
+            try:
+                got, st = fut.result()
+            except Exception as e:      # never stops the run
+                got, st = [], {'ok': False, 'count': 0, 'note': str(e)[:120]}
+            inv.engines_status[key] = dict(st, pivot_image=pivot, auto=True)
             raw.extend(got)
+    except concurrent.futures.TimeoutError:
+        for fut, (key, pivot) in futures.items():
+            if not fut.done():
+                inv.engines_status[key] = {'ok': False, 'count': 0, 'note': 'timeout', 'pivot_image': pivot}
+    finally:
+        ex.shutdown(wait=False)
     new = inv.add_candidates(raw, round_no=len(inv.steps))
     if isinstance(image_context, dict):
         image_context['query_is_derivative_of'] = sorted(inv.pivoted)
