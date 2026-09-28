@@ -101,8 +101,6 @@ services:
         sync: false
       - key: SERPAPI_API_KEY
         sync: false
-      - key: ZENSERP_API_KEY
-        sync: false
       - key: XAI_API_KEY
         sync: false
       - key: SIGHTENGINE_API_USER

@@ -43,7 +43,6 @@ class Config:
     IMGBB_API_KEY = os.environ.get('IMGBB_API_KEY')
     AIORNOT_API_KEY = os.environ.get('AIORNOT_API_KEY')
     SERPAPI_API_KEY = os.environ.get('SERPAPI_API_KEY')
-    ZENSERP_API_KEY = os.environ.get('ZENSERP_API_KEY')
 
 
 class DevelopmentConfig(Config):

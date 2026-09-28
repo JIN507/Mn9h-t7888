@@ -13,7 +13,6 @@ os.environ['DATABASE_URL'] = 'sqlite:///:memory:'
 os.environ['IMGBB_API_KEY'] = 'test-imgbb-key'
 os.environ['AIORNOT_API_KEY'] = 'test-aiornot-key'
 os.environ['SERPAPI_API_KEY'] = 'test-serpapi-key'
-os.environ['ZENSERP_API_KEY'] = 'test-zenserp-key'
 os.environ['XAI_API_KEY'] = 'test-xai-key'
 os.environ['SIGHTENGINE_API_USER'] = 'test-se-user'
 os.environ['SIGHTENGINE_API_SECRET'] = 'test-se-secret'
@@ -59,7 +58,7 @@ def _reset_circuit_breakers():
     injected by one test open the breaker for later tests."""
     yield
     import importlib
-    for mod_name in ('providers.zenserp', 'providers.serpapi',
+    for mod_name in ('providers.serpapi',
                      'providers.aiornot', 'providers.sightengine',
                      'providers.imgbb', 'providers.xai', 'providers.storage',
                      'providers.yandex', 'providers.tineye',

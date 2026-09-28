@@ -11,7 +11,6 @@ from werkzeug.utils import secure_filename
 from services.storage_service import host_image
 from services.media_service import UPLOAD_FOLDER, allowed_file, compute_hashes
 from services.search_service import (search_images, scrape_reverse_search,
-                                     build_direct_search_timeline,
                                      persist_search, find_cached_search,
                                      parse_iso_datetime)
 
