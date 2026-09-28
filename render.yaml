@@ -57,12 +57,33 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      # Origin engine, detection and the operator gate (set in the Render dashboard)
+      - key: AIORNOT_API_KEY
+        sync: false
+      - key: SERPAPI_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: GROK_API_KEY
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: R2_PUBLIC_BASE_URL
+        sync: false
+      - key: APP_LOGIN_USER
+        sync: false
+      - key: APP_LOGIN_PASSWORD
+        sync: false
+      - key: GATE_ENABLED
+        value: "true"
+      - key: BROWSER_SEARCH
+        value: "true"
     autoDeploy: true
 
   - type: worker
     name: bahith-worker
     env: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: "pip install -r requirements.txt && (python -m playwright install chromium || echo 'no chromium - TinEye engine skipped')"
     startCommand: python worker.py
     envVars:
       - key: DATABASE_URL
@@ -98,4 +119,16 @@ services:
         sync: false
       - key: IMGBB_API_KEY
         sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: GROK_API_KEY
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: R2_PUBLIC_BASE_URL
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: BROWSER_SEARCH
+        value: "true"
     autoDeploy: true

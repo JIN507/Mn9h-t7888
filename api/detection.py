@@ -423,12 +423,15 @@ def api_text_detection():
                 for block in raw_annotations:
                     if isinstance(block, list) and len(block) >= 2:
                         block_text = str(block[0])
-                        block_score = float(block[1]) if isinstance(block[1], (int, float)) else 0.0
-                        # Score seems to be per-block — lower means more AI-like
+                        try:
+                            block_score = float(block[1])
+                        except (TypeError, ValueError):
+                            block_score = 0.0
+                        block_score = max(0.0, min(block_score, 1.0))   # per-block AI probability
                         annotations.append({
                             'text': block_text.strip(),
-                            'is_ai': is_ai,  # Use overall verdict for block classification
-                            'confidence': ai_confidence
+                            'is_ai': block_score >= 0.5,
+                            'confidence': block_score
                         })
             
             payload = {
