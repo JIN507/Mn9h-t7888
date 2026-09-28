@@ -124,7 +124,7 @@ def test_text_detection(client):
         responses.POST, 'https://api.aiornot.com/v2/text/sync',
         json={'report': {'ai_text': {
             'confidence': 0.9, 'is_detected': True,
-            'annotations': [['first paragraph', 0.2], ['second one', 0.4]],
+            'annotations': [['first paragraph', 0.8], ['second one', 0.4]],
         }}}, status=200)
 
     r = client.post('/api/text-detection',
@@ -136,8 +136,9 @@ def test_text_detection(client):
     assert d['confidence_ai'] == 0.9
     assert abs(d['confidence_human'] - 0.1) < 1e-9
     assert len(d['annotations']) == 2
-    assert d['annotations'][0] == {
-        'text': 'first paragraph', 'is_ai': True, 'confidence': 0.9}
+    # per-block probability: the model scored each paragraph separately
+    assert d['annotations'][0] == {'text': 'first paragraph', 'is_ai': True, 'confidence': 0.8}
+    assert d['annotations'][1] == {'text': 'second one', 'is_ai': False, 'confidence': 0.4}
 
 
 def test_text_detection_too_short(client):
