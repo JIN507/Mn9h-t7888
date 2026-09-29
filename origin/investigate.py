@@ -63,6 +63,7 @@ class Investigation:
         self.copyset = None
         self.sigs = []
         self.seen = set()            # canonical URLs already verified/queued
+        self.candidates = []         # every row the engines returned (the "similar" section)
         self.sightings = []
         self.engines = {}            # label -> brief
         self.rounds = []
@@ -132,6 +133,7 @@ class Investigation:
         merged = engines.merge_candidates(answers.values(), self.seen)
         for c in merged:
             self.seen.add(c['canonical'])
+        self.candidates.extend(merged)
         return merged
 
 
@@ -338,7 +340,7 @@ def _finish(inv, cs, budget, data, image_url, progress, ident=None):
     # 5. decide
     progress('تحديد أول ظهور...')
     payload = report.build(inv.sightings, copies=cs.briefs(), engines=inv.engines, budget=budget,
-                           extras={**inv.extras, 'rounds': inv.rounds})
+                           extras={**inv.extras, 'rounds': inv.rounds}, candidates=inv.candidates)
     payload['mode'] = budget.mode
     payload['prior_sightings'] = inv.extras.get('prior_sightings') or []
     if budget.time_left() > 5:

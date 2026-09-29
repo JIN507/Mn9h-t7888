@@ -7,7 +7,7 @@ import GradientButton from '../components/GradientButton';
 import DropZone from '../components/DropZone';
 import ErrorBanner from '../components/ErrorBanner';
 import useJob from '../hooks/useJob';
-import { FirstSeenCard, TimelineCard, parseOriginPayload } from '../components/OriginReport';
+import { FirstSeenCard, TimelineCard, SimilarCard, parseOriginPayload } from '../components/OriginReport';
 
 // --- Components ---
 
@@ -488,6 +488,7 @@ const VideoAnalysis = () => {
                                 onRerun={() => handleVideoOrigin(true)} videoMode frames={originFrames} />
                             <TimelineCard report={parseOriginPayload(originPayload)} timeline={originPayload.timeline || []}
                                 cached={Boolean(originPayload.cached)} onRerun={() => handleVideoOrigin(true)} />
+                            <SimilarCard items={originPayload.similar || []} />
                         </div>
                     )}
                 </div>

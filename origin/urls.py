@@ -34,6 +34,15 @@ _LISTING_RE = re.compile(
 _PROFILE_RE = re.compile(
     r'^https://(x\.com|www\.instagram\.com|www\.tiktok\.com|www\.facebook\.com|www\.pinterest\.[a-z.]+|'
     r'[a-z]{2}\.pinterest\.com|www\.threads\.(net|com))/@?[A-Za-z0-9_.-]+/?$')
+# Profiles and channels on platforms whose URLs carry a marker before the name.
+_PROFILE_MARKED_RE = re.compile(
+    r'^https://(?:'
+    r'(?:www\.)?snapchat\.com/(?:@|add/)[^/?]+'
+    r'|(?:[a-z]{2,3}\.)?linkedin\.com/(?:in|company|school|pub)/[^/?]+'
+    r'|www\.youtube\.com/(?:@[^/?]+|(?:channel|c|user)/[^/?]+)(?:/(?:videos|featured|shorts|streams|community))?'
+    r'|(?:t\.me|telegram\.me)/(?:s/)?[A-Za-z0-9_]+'
+    r'|(?:www\.|old\.)?reddit\.com/(?:r|u|user)/[^/?]+'
+    r')/?$', re.IGNORECASE)
 
 
 def canonical(url):
@@ -108,7 +117,7 @@ def is_listing(url):
     path = parts.path or '/'
     if _LISTING_RE.search(path + ('?' + parts.query if parts.query else '')):
         return True
-    return bool(_PROFILE_RE.match(c))
+    return bool(_PROFILE_RE.match(c) or _PROFILE_MARKED_RE.match(c))
 
 
 def platform_of(url):

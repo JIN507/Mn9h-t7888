@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Calendar, Award, ChevronDown, MapPin, Clock, Globe } from 'lucide-react';
+import { Calendar, Award, ChevronDown, MapPin, Clock, Globe, LayoutGrid } from 'lucide-react';
 import GlassCard from './GlassCard';
 import ErrorBanner from './ErrorBanner';
 
@@ -145,6 +145,7 @@ export const parseOriginPayload = (payload) => (
         identity: payload.identity || null,
         priorSightings: payload.prior_sightings || [],
         leads: payload.leads || [],
+        similar: payload.similar || [],
         copies: payload.copies || [],
         budget: payload.budget || null,
         version: payload.version || 1,
@@ -321,7 +322,7 @@ export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = fal
                     <h2 className="font-bold text-slate-800">{videoMode ? 'أول ظهور مؤكد للفيديو' : 'أول ظهور مؤكد للصورة'}</h2>
                     {report.stats?.checked > 0 && (
                         <p className="text-[11px] text-slate-400">
-                            فُحصت {report.stats.checked} صفحة · مؤكدة بصرياً {report.stats.visually_confirmed || 0}
+                            {report.stats.candidates ? `${report.stats.candidates} نتيجة من المحركات · ` : ''}فُحصت {report.stats.checked} صفحة · مؤكدة بصرياً {report.stats.visually_confirmed || 0}
                             {videoMode && report.stats.frames > 1 && ` · ${report.stats.frames} إطارات`}
                         </p>
                     )}
@@ -449,6 +450,79 @@ export const FirstSeenCard = ({ report, cached = false, onRerun, videoMode = fal
                         </p>
                     )}
                 </details>
+            )}
+        </GlassCard>
+    );
+};
+
+/** Everything the engines returned that the automatic check did not confirm.
+ *  The reader judges by eye: picture, date and platform only. */
+const SIMILAR_PAGE = 24;
+export const SimilarCard = ({ items, style }) => {
+    const [filter, setFilter] = useState('الكل');
+    const [shownCount, setShownCount] = useState(SIMILAR_PAGE);
+    const counts = useMemo(() => {
+        const c = {};
+        (items || []).forEach((it) => { const k = platformCategory(it.link); c[k] = (c[k] || 0) + 1; });
+        return c;
+    }, [items]);
+    if (!items || items.length === 0) return null;
+    const chips = ['الكل', ...FILTER_PLATFORMS, 'ويب'].filter((k) => k === 'الكل' || counts[k]);
+    const filtered = items.filter((it) => filter === 'الكل' || platformCategory(it.link) === filter);
+    const shown = filtered.slice(0, shownCount);
+    return (
+        <GlassCard className="ai-result-card p-6 border-slate-200 shadow-sm mt-6 animate-fade-in-up" style={style}>
+            <div className="absolute top-0 left-0 right-0 h-1 rounded-t-2xl bg-gradient-to-r from-slate-400 via-slate-300 to-slate-400" />
+            <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-100">
+                <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center">
+                    <LayoutGrid className="w-5 h-5 text-slate-700" />
+                </div>
+                <div>
+                    <h2 className="font-bold text-slate-800">صور مشابهة من المحركات <span className="text-slate-400 text-sm">({items.length})</span></h2>
+                    <p className="text-[11px] text-slate-400 mt-0.5">لم يؤكدها الفحص الآلي — الحكم لك</p>
+                </div>
+            </div>
+
+            {chips.length > 2 && (
+                <div className="flex items-center gap-1.5 flex-wrap mb-3">
+                    {chips.map((k) => (
+                        <button key={k} type="button" onClick={() => { setFilter(k); setShownCount(SIMILAR_PAGE); }}
+                            className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all ${filter === k
+                                ? 'bg-slate-800 text-white border-slate-800'
+                                : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}
+                            dir={k === 'الكل' || k === 'ويب' ? 'rtl' : 'ltr'}>
+                            {k}<span className={`mr-1 text-[10px] ${filter === k ? 'text-slate-300' : 'text-slate-400'}`}>{k === 'الكل' ? items.length : counts[k]}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                {shown.map((item) => (
+                    <a key={item.link} href={item.link} target="_blank" rel="noopener noreferrer"
+                        className="group block rounded-xl border border-slate-200 bg-white overflow-hidden hover:border-slate-400 hover:shadow-sm transition-all">
+                        <div className="aspect-square bg-slate-100">
+                            <img src={item.thumbnail} alt="" loading="lazy" referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                    const img = e.currentTarget;
+                                    if (item.image_url && img.src !== item.image_url) img.src = item.image_url;
+                                    else img.style.visibility = 'hidden';
+                                }} />
+                        </div>
+                        <div className="p-2 flex items-center gap-1 flex-wrap">
+                            {item.published_at && <DatePill item={item} />}
+                            <PlatformPill url={item.link} />
+                        </div>
+                    </a>
+                ))}
+            </div>
+
+            {filtered.length > shownCount && (
+                <button type="button" onClick={() => setShownCount((n) => n + SIMILAR_PAGE)}
+                    className="mt-4 w-full text-xs font-bold px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors">
+                    عرض المزيد ({filtered.length - shownCount})
+                </button>
             )}
         </GlassCard>
     );

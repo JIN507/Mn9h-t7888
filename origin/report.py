@@ -5,6 +5,7 @@ from origin import dates, urls
 
 ELIGIBLE_IMAGE = ('platform', 'page')
 ELIGIBLE_DATE = ('platform_id', 'structured')
+SIMILAR_MAX = 120
 
 
 def eligible(s):
@@ -52,7 +53,45 @@ def public_item(s, is_first=False):
     }
 
 
-def build(sightings, *, copies, engines, budget, extras, upload_phash=None, note=None):
+def similar_items(candidates, sightings):
+    """What the engines returned and the app did not confirm, for the reader
+    to judge by eye: the engine's picture, the platform and a date when the
+    link or the engine gives one. Never feeds the first-appearance decision."""
+    from origin.engines import date_hint
+    state = {s['canonical']: s['image'].level for s in sightings}
+    order = {'exact': 0, 'page': 1, 'similar': 2, 'text': 3}
+    rows, seen = [], set()
+    for c in candidates or []:
+        canon = c.get('canonical') or urls.canonical(c.get('url'))
+        if not canon or canon in seen or state.get(canon, 'none') != 'none':
+            continue                      # confirmed pages and engine claims are in the timeline
+        thumb = c.get('thumb') or next(iter(c.get('thumbs') or []), None)
+        if not thumb:
+            continue                      # text results carry no picture to judge
+        seen.add(canon)
+        when = date_hint(c) or None
+        verdict = (c.get('thumb_check') or {}).get('verdict')
+        rows.append({
+            'link': c['url'], 'url': c['url'],
+            'thumbnail': thumb, 'image_url': c.get('image_url'),
+            'title': c.get('title') or urls.domain_of(c['url']),
+            'published_at': when, 'timestamp': when,
+            'date_text': when[:10] if when else 'بدون تاريخ',
+            'source': urls.domain_of(c['url']), 'domain': urls.domain_of(c['url']),
+            'platform': urls.platform_of(c['url']),
+            'match_type': c.get('match') or 'similar',
+            'providers': c.get('engines') or [],
+            'checked': canon in state,
+            'thumb_verdict': verdict,
+            'is_listing': urls.is_listing(c['url']),
+        })
+    rows.sort(key=lambda r: (order.get(r['match_type'], 9),
+                             {'match': 0, None: 1, 'unknown': 1, 'differs': 2}.get(r['thumb_verdict'], 1),
+                             r['published_at'] or '9999'))
+    return rows[:SIMILAR_MAX]
+
+
+def build(sightings, *, copies, engines, budget, extras, upload_phash=None, note=None, candidates=None):
     cands = sorted([s for s in sightings if eligible(s)], key=sort_key)
     origin = cands[0] if cands else None
     exact_first = None
@@ -76,12 +115,15 @@ def build(sightings, *, copies, engines, budget, extras, upload_phash=None, note
     undated = [s for s in sightings if not s['date'].when and s['image'].level != 'none']
     leads = [s for s in dated + undated if not eligible(s)]
     timeline = [public_item(s, s is origin) for s in dated + undated]
+    similar = similar_items(candidates, sightings)
     stats = {
         'checked': len(sightings),
         'with_dates': len(dated),
         'visually_confirmed': sum(1 for s in sightings if s['image'].level in ELIGIBLE_IMAGE),
         'engine_claims': sum(1 for s in sightings if s['image'].level == 'engine_claim'),
         'visually_rejected': sum(1 for s in sightings if s['image'].level == 'none'),
+        'candidates': len({c.get('canonical') for c in candidates or []}),
+        'similar': len(similar),
         'elapsed_s': budget.snapshot()['seconds'],
         'visual_verification': True,
         'frames': 1 + len(extras.get('frames') or []),
@@ -97,6 +139,7 @@ def build(sightings, *, copies, engines, budget, extras, upload_phash=None, note
         'timeline': timeline,
         'total': len(timeline),
         'leads': [public_item(s) for s in leads][:20],
+        'similar': similar,
         'copies': copies,
         'engines': engines,
         'budget': budget.snapshot(),

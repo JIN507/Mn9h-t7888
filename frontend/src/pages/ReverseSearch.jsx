@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Search, RefreshCw, X, ExternalLink } from 'lucide-react';
-import { FirstSeenCard, TimelineCard, parseOriginPayload } from '../components/OriginReport';
+import { FirstSeenCard, TimelineCard, SimilarCard, parseOriginPayload } from '../components/OriginReport';
 import apiClient from '../services/apiClient';
 import GlassCard from '../components/GlassCard';
 import ErrorBanner from '../components/ErrorBanner';
@@ -408,6 +408,9 @@ const ReverseSearch = () => {
                     />
                 </div>
             )}
+
+            {/* Similar images the engines returned: the reader decides */}
+            {!loading && originReport && <SimilarCard items={originReport.similar} />}
 
             {/* Idle State */}
             {!loading && !hasAnyResult && (
