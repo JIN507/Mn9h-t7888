@@ -68,3 +68,21 @@ user_files/
 
 # origin benchmark run artifacts
 benchmark/results/
+
+# Assistant / planning material — local working notes, not part of the product
+CLAUDE.md
+CLAUDE_CODE_PLAYBOOK.md
+skill.md
+.claude/
+.windsurf/
+.cursor/
+PROJECT_IMPROVEMENT_PLAN.md
+VISUAL_VERIFICATION_ENGINE.md
+REVERSE_SEARCH_PROVIDERS.md
+ORIGIN_V2_PLAN.md
+docs/INVESTIGATION_*.md
+docs/KEY_ROTATION.md
+
+# Benchmark cases reference private media and known answers — keep local
+benchmark/benchmark.yaml
+benchmark/baseline_v1.json
