@@ -123,6 +123,16 @@ def key_from_presigned_url(url):
         return None
 
 
+def refreshed_url(url):
+    """A presigned link to one of our own objects, signed again. Links expire
+    after PRESIGN_EXPIRES, and a queued job may start later than that. Any
+    other URL is returned unchanged."""
+    key = key_from_presigned_url(url) if url else None
+    if not key or not is_configured():
+        return url
+    return presigned_get_url(key) or url
+
+
 def presigned_get_url(key, expires=PRESIGN_EXPIRES):
     """Short-lived GET URL for a private object. Returns None on failure."""
     try:

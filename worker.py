@@ -6,7 +6,7 @@ import logging
 import os
 
 from redis import Redis
-from rq import Queue, Worker
+from rq import Queue, SimpleWorker
 
 logging.basicConfig(
     level=os.environ.get('LOG_LEVEL', 'INFO'),
@@ -27,8 +27,11 @@ def main():
         from services.embedding_service import warm_up
         logging.getLogger(__name__).info(
             'warming up embedding model: %s', warm_up())
-    worker = Worker([Queue(name, connection=connection) for name in QUEUES],
-                    connection=connection)
+    # Jobs run inside this process. The forking Worker hangs here: a child
+    # forked after torch / OpenCV started their thread pools waits forever on
+    # locks those threads held (seen in production: every job hit the timeout).
+    worker = SimpleWorker([Queue(name, connection=connection) for name in QUEUES],
+                          connection=connection)
     worker.work(with_scheduler=False)
 
 

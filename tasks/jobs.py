@@ -35,6 +35,13 @@ def _with_app_context(fn):
     return wrapper
 
 
+def _fresh(url):
+    """Re-sign our own storage links: the one made at upload may have expired
+    while the job waited in the queue."""
+    from providers.storage import refreshed_url
+    return refreshed_url(url)
+
+
 def _progress(message):
     from tasks.queue import get_current_local_job
     job = get_current_job() or get_current_local_job()
@@ -100,6 +107,7 @@ def _persist_analysis(user_id, analysis_type, service, media_hash,
 def run_xai_investigation(image_url, user_id=None):
     """Grok contextual investigation (was the 180s-blocking /api/xai-context)."""
     from providers.xai import investigate_image, extract_summary
+    image_url = _fresh(image_url)
     try:
         _progress('جاري البحث في الويب عن سياق الصورة (قد يستغرق دقائق)...')
         resp = investigate_image(image_url)
@@ -136,6 +144,8 @@ def run_direct_search(query=None, image_url=None, user_id=None,
 
     if image_url:
         from origin.investigate import investigate
+        image_url = _fresh(image_url)
+        extra_image_urls = [_fresh(u) for u in extra_image_urls or []] or None
         payload = investigate(image_url, progress=_progress,
                               extra_frame_urls=extra_image_urls, mode=mode)
         if not payload.get('success'):
@@ -194,7 +204,7 @@ def run_index_image(image_url, media_hash):
     """
     from services.vector_index import index_bytes
     try:
-        r = requests.get(image_url, timeout=(5, 15))
+        r = requests.get(_fresh(image_url), timeout=(5, 15))
         r.raise_for_status()
         index_bytes(r.content, media_hash, source='query')
     except Exception as e:
@@ -207,6 +217,7 @@ def run_provenance(image_url, user_id=None, image_hash=None,
     """Provenance analysis (page-fetch heavy; was blocking /api/provenance)."""
     from services.provenance_service import analyze_provenance
     from services.search_service import persist_search, parse_iso_datetime
+    image_url = _fresh(image_url)
     try:
         _progress('جاري جمع المطابقات البصرية...')
         payload = analyze_provenance(image_url)
