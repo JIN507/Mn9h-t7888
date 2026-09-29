@@ -86,3 +86,7 @@ docs/KEY_ROTATION.md
 # Benchmark cases reference private media and known answers — keep local
 benchmark/benchmark.yaml
 benchmark/baseline_v1.json
+
+# Server deployment
+.env.production
+secrets/

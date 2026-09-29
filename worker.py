@@ -1,4 +1,4 @@
-"""RQ worker entrypoint (Render worker service).
+"""RQ worker entrypoint (the `worker` service).
 
 Usage: python worker.py   (requires REDIS_URL)
 """

@@ -1,0 +1,88 @@
+# Tahaqqaq on a VPS: web + worker + Redis + Postgres behind Caddy (automatic HTTPS).
+#   cp deploy/production.env.example .env.production   # fill in the values
+#   docker compose up -d --build
+name: tahaqqaq
+
+x-app: &app
+  build: .
+  image: tahaqqaq:latest
+  restart: unless-stopped
+  env_file: .env.production
+  environment:
+    DATABASE_URL: postgresql://tahaqqaq:${POSTGRES_PASSWORD}@db:5432/tahaqqaq
+    REDIS_URL: redis://redis:6379/0
+    RATELIMIT_STORAGE_URI: redis://redis:6379/1
+    PUBLIC_BASE_URL: https://${DOMAIN}
+    CORS_ORIGINS: https://${DOMAIN}
+    FLASK_ENV: production
+  volumes:
+    - uploads:/app/uploads
+    - userdata:/app/user-data
+    - modelcache:/app/.cache
+    - ./secrets:/app/secrets:ro        # optional: Google Vision key file
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  web:
+    <<: *app
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/gate/me"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  worker:
+    <<: *app
+    command: ["python", "worker.py"]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes: ["redisdata:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tahaqqaq
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: tahaqqaq
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tahaqqaq -d tahaqqaq"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on: [web]
+
+volumes:
+  uploads:
+  userdata:
+  modelcache:
+  redisdata:
+  pgdata:
+  caddydata:
+  caddyconfig:

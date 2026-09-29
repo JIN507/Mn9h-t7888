@@ -1,0 +1,24 @@
+.git
+.env
+.env.*
+!.env.example
+venv/
+__pycache__/
+*.pyc
+frontend/node_modules/
+frontend/dist/
+uploads/
+user-data/
+user_data/
+user_files/
+*.db
+*.sqlite*
+benchmark/results/
+tests/
+docs/
+*.md
+.claude/
+google-credentials.json
+nskl.json
+*credentials*.json
+وسائط تحقق/
