@@ -31,7 +31,8 @@ services:
     <<: *app
     expose: ["8000"]
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/gate/me"]
+      # the page itself: /api/gate/me answers 401 without a login, which curl -f counts as a failure
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8000/"]
       interval: 30s
       timeout: 5s
       retries: 5
