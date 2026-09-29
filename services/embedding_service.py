@@ -31,6 +31,7 @@ def visual_verify_enabled():
 
 def encoder_available():
     """True if an encoder can produce embeddings right now."""
+    global _load_failed
     if _test_encoder is not None:
         return True
     if _load_failed:
@@ -40,6 +41,12 @@ def encoder_available():
         import torch   # noqa: F401
         return True
     except ImportError:
+        return False
+    except Exception as e:
+        # a broken install (e.g. mismatched torch / torchvision builds) must
+        # not take the worker down: run without embeddings
+        _load_failed = True
+        logger.error('Embedding runtime is installed but unusable: %s', e)
         return False
 
 

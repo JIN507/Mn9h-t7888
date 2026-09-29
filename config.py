@@ -22,7 +22,11 @@ class Config:
     # Fix Render.com's postgres:// → postgresql://
     if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
         DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-    
+    # Name the driver we install (psycopg2): newer SQLAlchemy defaults a bare
+    # postgresql:// URL to psycopg 3, which is not in requirements.txt
+    if DATABASE_URL and DATABASE_URL.startswith('postgresql://'):
+        DATABASE_URL = DATABASE_URL.replace('postgresql://', 'postgresql+psycopg2://', 1)
+
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {

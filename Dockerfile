@@ -28,14 +28,14 @@ RUN python -m playwright install --with-deps chromium
 # to skip it; the app then verifies with hashes and keypoint geometry only.
 ARG INSTALL_ML=true
 RUN if [ "$INSTALL_ML" = "true" ]; then \
-        pip install torch --index-url https://download.pytorch.org/whl/cpu && \
+        pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
         pip install "timm>=1.0"; \
     fi
 
 COPY . .
 COPY --from=frontend /build/dist ./frontend/dist
 
-RUN mkdir -p uploads user-data static/uploads/audio \
+RUN mkdir -p uploads user-data static/uploads/audio .cache \
     && useradd --create-home --uid 10001 app \
     && chown -R app:app /app /ms-playwright
 USER app
